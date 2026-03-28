@@ -10,8 +10,10 @@ import click
 
 from vigil.config import Config, ConfigError, find_vigil_root
 from vigil.init import init_project, parse_process_spec, prompt_for_processes
-from vigil.manager import ProcessAlreadyRunning, ProcessCrashed
+from vigil.manager import ProcessAlreadyRunning, ProcessCrashed, ProcessNotFound
 from vigil.manager import start as manager_start
+from vigil.manager import stop as manager_stop
+from vigil.manager import stop_all as manager_stop_all
 
 
 def _require_project() -> Path:
@@ -104,6 +106,42 @@ def cmd_start(
         click.echo(json.dumps({"name": record.name, "pid": record.pid, "status": "started"}))
     else:
         click.echo(f"Started {record.name!r} (pid {record.pid})")
+
+
+@main.command("stop")
+@click.argument("name", required=False, default=None)
+@click.option("--all", "stop_all_flag", is_flag=True, help="Stop all managed processes.")
+@click.option("--json", "as_json", is_flag=True, help="Output JSON.")
+def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool) -> None:
+    """Stop a managed process (or all processes with --all)."""
+    root = _require_project()
+    config = Config(root=root)
+
+    if stop_all_flag:
+        names = manager_stop_all(config)
+        if as_json:
+            click.echo(json.dumps({"status": "stopped", "names": names}))
+        else:
+            if names:
+                click.echo(f"Stopped {len(names)} process(es): {', '.join(names)}")
+            else:
+                click.echo("No managed processes to stop.")
+        return
+
+    if not name:
+        click.echo("Provide a process name or use --all.", err=True)
+        sys.exit(1)
+
+    try:
+        manager_stop(config, name)
+    except ProcessNotFound as e:
+        click.echo(str(e), err=True)
+        sys.exit(1)
+
+    if as_json:
+        click.echo(json.dumps({"name": name, "status": "stopped"}))
+    else:
+        click.echo(f"Stopped {name!r}")
 
 
 @main.command("status")

@@ -12,7 +12,7 @@ from pathlib import Path
 import psutil
 
 from vigil.config import Config
-from vigil.logs import open_log
+from vigil.logs import open_log, trim_log
 from vigil.state import ProcessRecord, StateManager
 
 
@@ -22,6 +22,10 @@ class ProcessAlreadyRunning(Exception):
 
 class ProcessCrashed(Exception):
     """Raised when a name is registered but the process has already exited."""
+
+
+class ProcessNotFound(Exception):
+    """Raised when stop is called for a name not in the statefile."""
 
 
 def start(
@@ -96,14 +100,50 @@ def start(
     return record
 
 
-def _stop_process(record: ProcessRecord) -> None:
+def stop(config: Config, name: str) -> None:
+    """Stop a managed process by *name*.
+
+    Sends SIGTERM, waits up to the configured grace period, then SIGKILL if
+    still alive. Removes the statefile entry and trims the log file.
+    Idempotent — succeeds silently if the process is already dead.
+    Raises ProcessNotFound if *name* is not in the statefile.
+    """
+    state = StateManager(config)
+    existing = {r.name: r for r in state.read_all()}
+
+    if name not in existing:
+        raise ProcessNotFound(f"No managed process named {name!r}.")
+
+    record = existing[name]
+    if record.alive:
+        _stop_process(record, grace=config.stop_grace_period)
+
+    state.delete(name)
+    trim_log(config, name, max_lines=config.log_retention_lines)
+
+
+def stop_all(config: Config) -> list[str]:
+    """Stop all managed processes.
+
+    Returns the list of names that were stopped.
+    """
+    state = StateManager(config)
+    names = [r.name for r in state.read_all()]
+    for name in names:
+        stop(config, name)
+    return names
+
+
+def _stop_process(record: ProcessRecord, grace: int = 5) -> None:
     """Send SIGTERM then SIGKILL to *record*'s PID."""
     try:
         proc = psutil.Process(record.pid)
         proc.terminate()
         try:
-            proc.wait(timeout=5)
+            proc.wait(timeout=grace)
         except psutil.TimeoutExpired:
             proc.kill()
+            with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+                proc.wait(timeout=5)
     except (psutil.NoSuchProcess, psutil.AccessDenied):
         pass
