@@ -122,6 +122,49 @@ def stop(config: Config, name: str) -> None:
     trim_log(config, name, max_lines=config.log_retention_lines)
 
 
+def restart(config: Config, name: str) -> ProcessRecord:
+    """Stop *name* and immediately restart it with its recorded command.
+
+    The log file is trimmed between stop and start. Returns the new ProcessRecord.
+    Raises ProcessNotFound if *name* is not in the statefile.
+    """
+    state = StateManager(config)
+    existing = {r.name: r for r in state.read_all()}
+
+    if name not in existing:
+        raise ProcessNotFound(f"No managed process named {name!r}.")
+
+    record = existing[name]
+    command = record.command
+    cwd = record.cwd
+
+    stop(config, name)
+    return start(config, name, command, force=True, cwd=cwd)
+
+
+def remove(config: Config, name: str, *, force: bool = False) -> None:
+    """Remove a process entry from the statefile.
+
+    Raises ProcessNotFound if *name* is not registered.
+    Raises ProcessAlreadyRunning if the process is alive and *force* is False.
+    With *force=True*, removes the entry without stopping the process.
+    """
+    state = StateManager(config)
+    existing = {r.name: r for r in state.read_all()}
+
+    if name not in existing:
+        raise ProcessNotFound(f"No managed process named {name!r}.")
+
+    record = existing[name]
+    if record.alive and not force:
+        raise ProcessAlreadyRunning(
+            f"Process {name!r} is still running (pid {record.pid}). "
+            "Use --force to remove the registry entry without stopping it."
+        )
+
+    state.delete(name)
+
+
 def stop_all(config: Config) -> list[str]:
     """Stop all managed processes.
 

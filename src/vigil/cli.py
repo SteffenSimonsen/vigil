@@ -12,6 +12,8 @@ import click
 from vigil.config import Config, ConfigError, find_vigil_root
 from vigil.init import init_project, parse_process_spec, prompt_for_processes
 from vigil.manager import ProcessAlreadyRunning, ProcessCrashed, ProcessNotFound
+from vigil.manager import remove as manager_remove
+from vigil.manager import restart as manager_restart
 from vigil.manager import start as manager_start
 from vigil.manager import stop as manager_stop
 from vigil.manager import stop_all as manager_stop_all
@@ -145,6 +147,50 @@ def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool) -> None:
         click.echo(json.dumps({"name": name, "status": "stopped"}))
     else:
         click.echo(f"Stopped {name!r}")
+
+
+@main.command("restart")
+@click.argument("name")
+@click.option("--json", "as_json", is_flag=True, help="Output JSON.")
+def cmd_restart(name: str, as_json: bool) -> None:
+    """Stop and restart a managed process using its recorded command."""
+    root = _require_project()
+    config = Config(root=root)
+
+    try:
+        record = manager_restart(config, name)
+    except ProcessNotFound as e:
+        click.echo(str(e), err=True)
+        sys.exit(1)
+
+    if as_json:
+        click.echo(json.dumps({"name": record.name, "pid": record.pid, "status": "restarted"}))
+    else:
+        click.echo(f"Restarted {record.name!r} (pid {record.pid})")
+
+
+@main.command("remove")
+@click.argument("name")
+@click.option("--force", is_flag=True, help="Remove registry entry without stopping the process.")
+@click.option("--json", "as_json", is_flag=True, help="Output JSON.")
+def cmd_remove(name: str, force: bool, as_json: bool) -> None:
+    """Remove a process entry from the registry."""
+    root = _require_project()
+    config = Config(root=root)
+
+    try:
+        manager_remove(config, name, force=force)
+    except ProcessNotFound as e:
+        click.echo(str(e), err=True)
+        sys.exit(1)
+    except ProcessAlreadyRunning as e:
+        click.echo(str(e), err=True)
+        sys.exit(1)
+
+    if as_json:
+        click.echo(json.dumps({"name": name, "status": "removed"}))
+    else:
+        click.echo(f"Removed {name!r}")
 
 
 @main.command("status")
