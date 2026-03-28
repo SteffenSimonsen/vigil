@@ -27,6 +27,7 @@ class ProcessRecord:
     command: str
     started_at: float
     port: int | None = None
+    cwd: str | None = None
     alive: bool = False  # populated on read, not persisted
 
     def to_dict(self) -> dict[str, Any]:
@@ -36,6 +37,7 @@ class ProcessRecord:
             "command": self.command,
             "started_at": self.started_at,
             "port": self.port,
+            "cwd": self.cwd,
         }
 
     @classmethod
@@ -46,6 +48,7 @@ class ProcessRecord:
             command=data["command"],
             started_at=data["started_at"],
             port=data.get("port"),
+            cwd=data.get("cwd"),
         )
 
 
