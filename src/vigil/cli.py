@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -14,6 +15,8 @@ from vigil.manager import ProcessAlreadyRunning, ProcessCrashed, ProcessNotFound
 from vigil.manager import start as manager_start
 from vigil.manager import stop as manager_stop
 from vigil.manager import stop_all as manager_stop_all
+from vigil.scanner import ports_for_pid
+from vigil.state import StateManager
 
 
 def _require_project() -> Path:
@@ -148,9 +151,48 @@ def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 def cmd_status(as_json: bool) -> None:
     """Show status of all managed processes."""
-    _require_project()
-    # Full implementation comes in a later issue.
+    root = _require_project()
+    config = Config(root=root)
+    records = StateManager(config).read_all()
+
+    managed: list[dict[str, Any]] = []
+    for record in records:
+        if record.alive:
+            managed.append(
+                {
+                    "name": record.name,
+                    "command": record.command,
+                    "pid": record.pid,
+                    "alive": True,
+                    "ports": ports_for_pid(record.pid),
+                }
+            )
+        else:
+            managed.append(
+                {
+                    "name": record.name,
+                    "command": record.command,
+                    "pid": None,
+                    "alive": False,
+                    "crashed": True,
+                    "ports": [],
+                }
+            )
+
     if as_json:
-        click.echo(json.dumps({"processes": []}))
-    else:
+        click.echo(json.dumps({"managed": managed}, indent=2))
+        return
+
+    if not managed:
         click.echo("No managed processes.")
+        return
+
+    for entry in managed:
+        if entry["alive"]:
+            ports_str = "  ".join(f":{p}" for p in entry["ports"])
+            click.echo(
+                f"  {entry['name']:<12} \u25cf alive    PID {entry['pid']}  {ports_str}"
+                f"  ({entry['command']})"
+            )
+        else:
+            click.echo(f"  {entry['name']:<12} \u2716 crashed  ({entry['command']})")
