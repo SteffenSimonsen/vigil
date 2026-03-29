@@ -118,6 +118,48 @@ class TestStartCLI:
                 with contextlib.suppress(Exception):
                     psutil.Process(old_pid).kill()
 
+    def test_start_nonexistent_command_exits_with_json_error(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            result = runner.invoke(
+                main,
+                ["start", "backend", "8080", "--json"],
+            )
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert data["code"] == 1
+
+    def test_start_unclosed_quote_exits_with_json_error(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            result = runner.invoke(
+                main,
+                ["start", "backend", "python -m http.server 'unclosed", "--json"],
+            )
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert data["code"] == 1
+
+    def test_start_permission_error_exits_with_json_error(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        # Create a file that exists but is not executable
+        script = tmp_path / "notexec.sh"
+        script.write_text("#!/bin/sh\necho hello")
+        script.chmod(0o644)
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            result = runner.invoke(
+                main,
+                ["start", "backend", str(script), "--json"],
+            )
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert data["code"] == 1
+
     def test_start_env_flag(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()

@@ -108,7 +108,13 @@ def cmd_init(process_specs: tuple[str, ...], force: bool, as_json: bool) -> None
     root = Path.cwd()
 
     if process_specs:
-        processes = [parse_process_spec(spec) for spec in process_specs]
+        try:
+            processes = [parse_process_spec(spec) for spec in process_specs]
+        except ValueError as e:
+            if as_json:
+                _json_error(str(e))
+            click.echo(str(e), err=True)
+            sys.exit(1)
     else:
         processes = prompt_for_processes()
 
@@ -173,6 +179,11 @@ def cmd_start(
             _json_error(str(e))
         click.echo(str(e), err=True)
         sys.exit(1)
+    except (FileNotFoundError, PermissionError, ValueError) as e:
+        if as_json:
+            _json_error(str(e))
+        click.echo(str(e), err=True)
+        sys.exit(1)
 
     if as_json:
         click.echo(json.dumps({"name": record.name, "pid": record.pid, "status": "started"}))
@@ -231,6 +242,11 @@ def cmd_restart(name: str, as_json: bool) -> None:
     try:
         record = manager_restart(config, name)
     except ProcessNotFound as e:
+        if as_json:
+            _json_error(str(e))
+        click.echo(str(e), err=True)
+        sys.exit(1)
+    except (FileNotFoundError, PermissionError, ValueError) as e:
         if as_json:
             _json_error(str(e))
         click.echo(str(e), err=True)
@@ -448,7 +464,17 @@ def cmd_scan(
         listeners = scan_ports([port_filter])
     elif range_filter is not None:
         start_s, _, end_s = range_filter.partition("-")
-        ports = list(range(int(start_s), int(end_s) + 1))
+        try:
+            ports = list(range(int(start_s), int(end_s) + 1))
+        except ValueError:
+            msg = (
+                f"Invalid --range {range_filter!r}: expected START-END with integers"
+                " (e.g. 3000-4000)."
+            )
+            if as_json:
+                _json_error(msg)
+            click.echo(msg, err=True)
+            sys.exit(1)
         listeners = scan_ports(ports)
     else:
         listeners = scan_ports(_DEFAULT_DEV_PORTS)

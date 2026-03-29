@@ -75,6 +75,32 @@ class TestRestartCLI:
                             psutil.Process(entry["pid"]).kill()
 
 
+class TestRestartOSErrors:
+    def test_restart_nonexistent_command_exits_with_json_error(self, runner: CliRunner) -> None:
+        """vigil restart exits 1 with JSON error when the recorded command no longer exists."""
+        import json as _json
+
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            # Write a state record with a command that will trigger FileNotFoundError
+            state = {
+                "backend": {
+                    "name": "backend",
+                    "pid": 1,
+                    "command": "8080",
+                    "started_at": 1000000.0,
+                    "port": None,
+                    "cwd": None,
+                }
+            }
+            (Path(".vigil") / "state.json").write_text(_json.dumps(state))
+            result = runner.invoke(main, ["restart", "backend", "--json"])
+            assert result.exit_code == 1
+            data = _json.loads(result.output)
+            assert "error" in data
+            assert data["code"] == 1
+
+
 class TestRemoveCLI:
     def test_remove_crashed_entry_json(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():

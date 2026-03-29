@@ -26,7 +26,11 @@ def parse_process_spec(spec: str) -> ProcessDef:
     command = parts[1].strip() if len(parts) > 1 else ""
     port: int | None = None
     if len(parts) > 2 and parts[2].strip():
-        port = int(parts[2].strip())
+        port_str = parts[2].strip()
+        try:
+            port = int(port_str)
+        except ValueError:
+            raise ValueError(f"Invalid port {port_str!r}: port must be an integer.") from None
     return ProcessDef(name=name, command=command, port=port)
 
 

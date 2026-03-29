@@ -118,6 +118,29 @@ class TestInitExistingVigilfile:
             assert "web" not in content
 
 
+class TestInitBadProcessSpec:
+    def test_nonnumeric_port_exits_with_json_error(self, runner: CliRunner, tmp_path: Path) -> None:
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(
+                main,
+                ["init", "--process", "backend,python3 -m http.server,notaport", "--json"],
+            )
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert data["code"] == 1
+
+    def test_nonnumeric_port_text_output_exits_with_error(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(
+                main,
+                ["init", "--process", "backend,python3 -m http.server,notaport"],
+            )
+            assert result.exit_code == 1
+
+
 class TestInitOutsideProject:
     def test_command_outside_project_gives_error(self, runner: CliRunner, tmp_path: Path) -> None:
         # Running vigil status (not init) outside a project should error

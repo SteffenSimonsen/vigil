@@ -175,6 +175,32 @@ class TestVigilScanDockerEnrichment:
         assert "postgres" in result.output
 
 
+class TestVigilScanBadRange:
+    def test_scan_range_nonnumeric_exits_with_json_error(self) -> None:
+        """vigil scan --range abc-def exits 1 with JSON error."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["scan", "--range", "abc-def", "--json"])
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert "error" in data
+        assert data["code"] == 1
+
+    def test_scan_range_no_hyphen_exits_with_json_error(self) -> None:
+        """vigil scan --range 8000 (no hyphen) exits 1 with JSON error."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["scan", "--range", "8000", "--json"])
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert "error" in data
+        assert data["code"] == 1
+
+    def test_scan_range_nonnumeric_text_output_exits_with_error(self) -> None:
+        """vigil scan --range abc-def (text mode) exits 1."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["scan", "--range", "abc-def"])
+        assert result.exit_code == 1
+
+
 class TestVigilNext:
     def test_next_returns_next_free_port_from_3000(self) -> None:
         """vigil next returns first free port starting from 3000."""
