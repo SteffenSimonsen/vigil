@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from vigil.config import Config
+from vigil.scanner import ports_for_pid
 from vigil.state import StateManager
 
 
@@ -32,6 +33,10 @@ def resolve_url(config: Config, target: str) -> str:
                 return url_override
             if record.port is not None:
                 return f"http://localhost:{record.port}"
+            # Port not stored — fall back to live scanner lookup
+            live_ports = ports_for_pid(record.pid)
+            if live_ports:
+                return f"http://localhost:{live_ports[0]}"
             return f"http://localhost:{record.port}"
 
     raise UnknownProcess(f"No process named {target!r}")

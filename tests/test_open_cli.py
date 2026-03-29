@@ -74,6 +74,53 @@ class TestOpenBrowser:
         mock_open.assert_called_once_with("http://localhost:8000")
 
 
+class TestOpenNameLiveScanner:
+    def test_open_name_falls_back_to_live_scanner_when_port_is_null(
+        self, runner: CliRunner
+    ) -> None:
+        """vigil open <name> falls back to live scanner when statefile port is null."""
+        import json as _json
+        from unittest.mock import MagicMock, patch
+
+        fake_pid = 88888
+        fake_started_at = 1000.0
+
+        # Build a fake psutil connection: pid=fake_pid, LISTEN on port 8765
+        fake_conn = MagicMock()
+        fake_conn.status = "LISTEN"
+        fake_conn.pid = fake_pid
+        fake_conn.laddr.port = 8765
+
+        # Fake process with matching create_time
+        fake_proc = MagicMock()
+        fake_proc.create_time.return_value = fake_started_at
+
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            state = {
+                "backend": {
+                    "name": "backend",
+                    "pid": fake_pid,
+                    "command": "python -m myapp",
+                    "started_at": fake_started_at,
+                    "port": None,
+                    "cwd": None,
+                }
+            }
+            Path(".vigil/state.json").write_text(_json.dumps(state))
+
+            with (
+                patch("psutil.pid_exists", return_value=True),
+                patch("psutil.Process", return_value=fake_proc),
+                patch("psutil.net_connections", return_value=[fake_conn]),
+            ):
+                result = runner.invoke(main, ["open", "backend", "--json"], catch_exceptions=False)
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data == {"url": "http://localhost:8765"}
+
+
 class TestOpenName:
     def test_open_name_json_resolves_port_from_statefile(self, runner: CliRunner) -> None:
         """vigil open <name> --json looks up port from statefile."""
