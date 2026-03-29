@@ -20,6 +20,7 @@ from vigil.manager import stop as manager_stop
 from vigil.manager import stop_all as manager_stop_all
 from vigil.scanner import ports_for_pid
 from vigil.state import StateManager
+from vigil.wait import ProcessDied, WaitTimeout, wait_for_ready
 
 
 def _require_project() -> Path:
@@ -241,6 +242,59 @@ def _follow_logs(config: Config, name: str) -> None:
                     time.sleep(0.1)
         except KeyboardInterrupt:
             pass
+
+
+@main.command("wait")
+@click.argument("name")
+@click.option("--timeout", default=30.0, show_default=True, help="Seconds before giving up.")
+@click.option("--port", "port_override", default=None, type=int, help="Wait for a specific port.")
+@click.option("--http", "http_flag", is_flag=True, default=False, help="Wait for HTTP on /.")
+@click.option(
+    "--http-path",
+    "http_path_value",
+    default=None,
+    type=str,
+    metavar="PATH",
+    help="Wait for HTTP response on PATH (implies --http). E.g. --http-path=/health.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Output JSON.")
+def cmd_wait(
+    name: str,
+    timeout: float,
+    port_override: int | None,
+    http_flag: bool,
+    http_path_value: str | None,
+    as_json: bool,
+) -> None:
+    """Block until a managed process is ready (port open, optional HTTP check).
+
+    Use --http to check for any HTTP response on / (the default path).
+    Use --http-path=/health to check on a custom path.
+    """
+    root = _require_project()
+    config = Config(root=root)
+
+    http_path: str | None = http_path_value if http_path_value else ("/" if http_flag else None)
+
+    try:
+        wait_for_ready(config, name, timeout=timeout, port=port_override, http_path=http_path)
+    except ProcessDied as e:
+        if as_json:
+            click.echo(json.dumps({"name": name, "status": "died", "error": str(e)}))
+        else:
+            click.echo(str(e), err=True)
+        sys.exit(2)
+    except WaitTimeout as e:
+        if as_json:
+            click.echo(json.dumps({"name": name, "status": "timeout", "error": str(e)}))
+        else:
+            click.echo(str(e), err=True)
+        sys.exit(1)
+
+    if as_json:
+        click.echo(json.dumps({"name": name, "status": "ready"}))
+    else:
+        click.echo(f"{name!r} is ready.")
 
 
 @main.command("status")
