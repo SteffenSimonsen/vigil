@@ -12,6 +12,7 @@ import click
 from vigil.config import Config, ConfigError, find_vigil_root
 from vigil.docker import enrich as docker_enrich
 from vigil.docker import lookup as docker_lookup
+from vigil.health import check_health
 from vigil.init import init_project, parse_process_spec, prompt_for_processes
 from vigil.logs import LogNotFound, read_log
 from vigil.manager import ProcessAlreadyRunning, ProcessCrashed, ProcessNotFound
@@ -407,6 +408,33 @@ def cmd_scan(
             else:
                 docker_suffix = ""
             click.echo(f"  :{entry['port']:<6} pid {entry['pid']}  {proc}{docker_suffix}")
+
+
+@main.command("health")
+@click.option("--endpoint", default="/", show_default=True, help="HTTP path to check.")
+@click.option("--timeout", "timeout_sec", default=None, type=float, help="Seconds per check.")
+@click.option("--json", "as_json", is_flag=True, help="Output JSON.")
+def cmd_health(endpoint: str, timeout_sec: float | None, as_json: bool) -> None:
+    """Check the health of all alive managed processes."""
+    root = _require_project()
+    config = Config(root=root)
+
+    results = check_health(config, endpoint=endpoint, timeout=timeout_sec)
+
+    if as_json:
+        click.echo(json.dumps({"processes": list(results)}, indent=2))
+        return
+
+    if not results:
+        click.echo("No alive managed processes.")
+        return
+
+    for r in results:
+        if r["healthy"]:
+            latency = f"  {r['latency_ms']:.0f}ms" if r["latency_ms"] is not None else ""
+            click.echo(f"  {r['name']:<12} \u2713 healthy  {r['status'] or ''}{latency}")
+        else:
+            click.echo(f"  {r['name']:<12} \u2717 unhealthy  {r['error'] or ''}")
 
 
 @main.command("next")
