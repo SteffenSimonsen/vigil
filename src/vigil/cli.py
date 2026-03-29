@@ -58,6 +58,12 @@ _DEFAULT_DEV_PORTS: list[int] = [
 ]
 
 
+def _json_error(message: str, code: int = 1) -> None:
+    """Emit a JSON error to stdout and exit. Used when --json is active."""
+    click.echo(json.dumps({"error": message, "code": code}))
+    sys.exit(code)
+
+
 def _require_project() -> Path:
     """Return project root or exit with a clear error message."""
     try:
@@ -138,9 +144,13 @@ def cmd_start(
     try:
         record = manager_start(config, name, command, force=force, env=env, cwd=cwd)
     except ProcessAlreadyRunning as e:
+        if as_json:
+            _json_error(str(e))
         click.echo(str(e), err=True)
         sys.exit(1)
     except ProcessCrashed as e:
+        if as_json:
+            _json_error(str(e))
         click.echo(str(e), err=True)
         sys.exit(1)
 
@@ -171,12 +181,16 @@ def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool) -> None:
         return
 
     if not name:
+        if as_json:
+            _json_error("Provide a process name or use --all.")
         click.echo("Provide a process name or use --all.", err=True)
         sys.exit(1)
 
     try:
         manager_stop(config, name)
     except ProcessNotFound as e:
+        if as_json:
+            _json_error(str(e))
         click.echo(str(e), err=True)
         sys.exit(1)
 
@@ -197,6 +211,8 @@ def cmd_restart(name: str, as_json: bool) -> None:
     try:
         record = manager_restart(config, name)
     except ProcessNotFound as e:
+        if as_json:
+            _json_error(str(e))
         click.echo(str(e), err=True)
         sys.exit(1)
 
@@ -218,9 +234,13 @@ def cmd_remove(name: str, force: bool, as_json: bool) -> None:
     try:
         manager_remove(config, name, force=force)
     except ProcessNotFound as e:
+        if as_json:
+            _json_error(str(e))
         click.echo(str(e), err=True)
         sys.exit(1)
     except ProcessAlreadyRunning as e:
+        if as_json:
+            _json_error(str(e))
         click.echo(str(e), err=True)
         sys.exit(1)
 
@@ -247,6 +267,8 @@ def cmd_logs(name: str, tail: int, follow: bool, as_json: bool) -> None:
     try:
         lines = read_log(config, name, tail=tail)
     except LogNotFound as e:
+        if as_json:
+            _json_error(str(e))
         click.echo(str(e), err=True)
         sys.exit(1)
 
@@ -489,6 +511,8 @@ def cmd_open(target: str, as_json: bool) -> None:
     try:
         url = resolve_url(config, target)
     except UnknownProcess as e:
+        if as_json:
+            _json_error(str(e))
         click.echo(str(e), err=True)
         sys.exit(1)
 
