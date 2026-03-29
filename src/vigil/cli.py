@@ -15,7 +15,7 @@ from vigil.docker import enrich as docker_enrich
 from vigil.docker import lookup as docker_lookup
 from vigil.free import free_port
 from vigil.health import check_health
-from vigil.init import init_project, parse_process_spec, prompt_for_processes
+from vigil.init import VigilfileExistsError, init_project, parse_process_spec, prompt_for_processes
 from vigil.logs import LogNotFound, read_log
 from vigil.manager import ProcessAlreadyRunning, ProcessCrashed, ProcessNotFound
 from vigil.manager import remove as manager_remove
@@ -101,8 +101,9 @@ def main() -> None:
     metavar="NAME,CMD[,PORT]",
     help="Non-interactive: define a process as name,command[,port].",
 )
+@click.option("--force", is_flag=True, help="Overwrite existing Vigilfile.")
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
-def cmd_init(process_specs: tuple[str, ...], as_json: bool) -> None:
+def cmd_init(process_specs: tuple[str, ...], force: bool, as_json: bool) -> None:
     """Initialize a vigil project in the current directory."""
     root = Path.cwd()
 
@@ -111,7 +112,11 @@ def cmd_init(process_specs: tuple[str, ...], as_json: bool) -> None:
     else:
         processes = prompt_for_processes()
 
-    init_project(root, processes)
+    try:
+        init_project(root, processes, force=force)
+    except VigilfileExistsError as exc:
+        click.echo(json.dumps({"error": str(exc), "code": 1}, indent=2))
+        sys.exit(1)
 
     if as_json:
         click.echo(

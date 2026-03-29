@@ -46,8 +46,14 @@ def _write_gitignore(vigil_dir: Path) -> None:
     (vigil_dir / ".gitignore").write_text("state.json\nlogs/\n")
 
 
-def init_project(root: Path, processes: list[ProcessDef]) -> None:
+class VigilfileExistsError(Exception):
+    """Raised when Vigilfile already exists and --force was not specified."""
+
+
+def init_project(root: Path, processes: list[ProcessDef], force: bool = False) -> None:
     """Create the `.vigil/` directory, `.gitignore`, and `Vigilfile`."""
+    if not force and (root / "Vigilfile").exists():
+        raise VigilfileExistsError("Vigilfile already exists. Use --force to overwrite.")
     vigil_dir = root / ".vigil"
     vigil_dir.mkdir(parents=True, exist_ok=True)
     _write_gitignore(vigil_dir)

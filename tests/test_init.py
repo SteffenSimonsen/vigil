@@ -88,6 +88,36 @@ class TestInitNonInteractive:
             assert data["processes"][0]["port"] is None
 
 
+class TestInitExistingVigilfile:
+    def test_errors_when_vigilfile_already_exists(self, runner: CliRunner, tmp_path: Path) -> None:
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            runner.invoke(main, ["init", "--process", "web,python -m http.server,8000"])
+            result = runner.invoke(
+                main, ["init", "--process", "api,uvicorn main:app,8001", "--json"]
+            )
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "already exists" in data["error"]
+            assert "--force" in data["error"]
+            assert data["code"] == 1
+
+    def test_force_flag_overwrites_existing_vigilfile(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            runner.invoke(main, ["init", "--process", "web,python -m http.server,8000"])
+            result = runner.invoke(
+                main,
+                ["init", "--process", "api,uvicorn main:app,8001", "--force", "--json"],
+            )
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["status"] == "created"
+            content = Path("Vigilfile").read_text()
+            assert "api" in content
+            assert "web" not in content
+
+
 class TestInitOutsideProject:
     def test_command_outside_project_gives_error(self, runner: CliRunner, tmp_path: Path) -> None:
         # Running vigil status (not init) outside a project should error
