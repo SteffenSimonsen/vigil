@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import click
+from click.shell_completion import CompletionItem
 
 from vigil.config import Config, ConfigError, find_vigil_root
 from vigil.docker import enrich as docker_enrich
@@ -30,6 +31,20 @@ from vigil.vigilfile import down as vigilfile_down
 from vigil.vigilfile import load as vigilfile_load
 from vigil.vigilfile import up as vigilfile_up
 from vigil.wait import ProcessDied, WaitTimeout, wait_for_ready
+
+
+def _complete_process_names(
+    ctx: click.Context, param: click.Parameter, incomplete: str
+) -> list[CompletionItem]:
+    """Shell completion callback: return process names from the statefile."""
+    try:
+        root = find_vigil_root(Path.cwd())
+        config = Config(root=root)
+        records = StateManager(config).read_all()
+        return [CompletionItem(r.name) for r in records if r.name.startswith(incomplete)]
+    except ConfigError:
+        return []
+
 
 _DEFAULT_DEV_PORTS: list[int] = [
     *range(3000, 4000),
@@ -136,7 +151,7 @@ def cmd_start(
 
 
 @main.command("stop")
-@click.argument("name", required=False, default=None)
+@click.argument("name", required=False, default=None, shell_complete=_complete_process_names)
 @click.option("--all", "stop_all_flag", is_flag=True, help="Stop all managed processes.")
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool) -> None:
@@ -172,7 +187,7 @@ def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool) -> None:
 
 
 @main.command("restart")
-@click.argument("name")
+@click.argument("name", shell_complete=_complete_process_names)
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 def cmd_restart(name: str, as_json: bool) -> None:
     """Stop and restart a managed process using its recorded command."""
@@ -216,7 +231,7 @@ def cmd_remove(name: str, force: bool, as_json: bool) -> None:
 
 
 @main.command("logs")
-@click.argument("name")
+@click.argument("name", shell_complete=_complete_process_names)
 @click.option("--tail", default=50, show_default=True, help="Number of lines to show.")
 @click.option("--follow", "follow", is_flag=True, help="Stream new output (tail -f style).")
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
@@ -265,7 +280,7 @@ def _follow_logs(config: Config, name: str) -> None:
 
 
 @main.command("wait")
-@click.argument("name")
+@click.argument("name", shell_complete=_complete_process_names)
 @click.option("--timeout", default=30.0, show_default=True, help="Seconds before giving up.")
 @click.option("--port", "port_override", default=None, type=int, help="Wait for a specific port.")
 @click.option("--http", "http_flag", is_flag=True, default=False, help="Wait for HTTP on /.")
@@ -464,7 +479,7 @@ def cmd_free(port: int, as_json: bool) -> None:
 
 
 @main.command("open")
-@click.argument("target")
+@click.argument("target", shell_complete=_complete_process_names)
 @click.option("--json", "as_json", is_flag=True, help="Output JSON without opening a browser.")
 def cmd_open(target: str, as_json: bool) -> None:
     """Open a service or port in the browser."""
