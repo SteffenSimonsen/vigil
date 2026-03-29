@@ -18,9 +18,20 @@ from vigil.manager import restart as manager_restart
 from vigil.manager import start as manager_start
 from vigil.manager import stop as manager_stop
 from vigil.manager import stop_all as manager_stop_all
-from vigil.scanner import ports_for_pid
+from vigil.scanner import next_free_port, ports_for_pid, scan_all, scan_ports
 from vigil.state import StateManager
 from vigil.wait import ProcessDied, WaitTimeout, wait_for_ready
+
+_DEFAULT_DEV_PORTS: list[int] = [
+    *range(3000, 4000),
+    *range(4000, 5000),
+    *range(5000, 6000),
+    *range(8000, 9000),
+    *range(9000, 10000),
+    5432,
+    6379,
+    27017,
+]
 
 
 def _require_project() -> Path:
@@ -346,3 +357,59 @@ def cmd_status(as_json: bool) -> None:
             )
         else:
             click.echo(f"  {entry['name']:<12} \u2716 crashed  ({entry['command']})")
+
+
+@main.command("scan")
+@click.option("--port", "port_filter", default=None, type=int, help="Check a single port.")
+@click.option("--range", "range_filter", default=None, metavar="START-END", help="Check a range.")
+@click.option("--all", "scan_all_flag", is_flag=True, help="Full OS socket table.")
+@click.option("--json", "as_json", is_flag=True, help="Output JSON.")
+def cmd_scan(
+    port_filter: int | None,
+    range_filter: str | None,
+    scan_all_flag: bool,
+    as_json: bool,
+) -> None:
+    """Show the port landscape (default: dev ranges)."""
+    if scan_all_flag:
+        listeners = scan_all()
+    elif port_filter is not None:
+        listeners = scan_ports([port_filter])
+    elif range_filter is not None:
+        start_s, _, end_s = range_filter.partition("-")
+        ports = list(range(int(start_s), int(end_s) + 1))
+        listeners = scan_ports(ports)
+    else:
+        listeners = scan_ports(_DEFAULT_DEV_PORTS)
+
+    if as_json:
+        click.echo(json.dumps({"listeners": list(listeners)}, indent=2))
+    else:
+        if not listeners:
+            click.echo("No listeners found.")
+            return
+        for entry in listeners:
+            proc = entry["process"] or "?"
+            click.echo(f"  :{entry['port']:<6} pid {entry['pid']}  {proc}")
+
+
+@main.command("next")
+@click.argument("start", default=3000, type=int, required=False)
+@click.option("--count", default=1, type=int, show_default=True, help="Number of free ports.")
+@click.option("--json", "as_json", is_flag=True, help="Output JSON.")
+def cmd_next(start: int, count: int, as_json: bool) -> None:
+    """Find the next free port(s) starting from START (default 3000)."""
+    result = next_free_port(start, count=count)
+
+    if as_json:
+        if count == 1:
+            click.echo(json.dumps({"port": result}))
+        else:
+            click.echo(json.dumps({"ports": result}))
+    else:
+        if count == 1:
+            click.echo(str(result))
+        else:
+            assert isinstance(result, list)
+            for p in result:
+                click.echo(str(p))
