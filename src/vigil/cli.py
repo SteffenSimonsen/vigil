@@ -12,6 +12,7 @@ import click
 from vigil.config import Config, ConfigError, find_vigil_root
 from vigil.docker import enrich as docker_enrich
 from vigil.docker import lookup as docker_lookup
+from vigil.free import free_port
 from vigil.health import check_health
 from vigil.init import init_project, parse_process_spec, prompt_for_processes
 from vigil.logs import LogNotFound, read_log
@@ -435,6 +436,26 @@ def cmd_health(endpoint: str, timeout_sec: float | None, as_json: bool) -> None:
             click.echo(f"  {r['name']:<12} \u2713 healthy  {r['status'] or ''}{latency}")
         else:
             click.echo(f"  {r['name']:<12} \u2717 unhealthy  {r['error'] or ''}")
+
+
+@main.command("free")
+@click.argument("port", type=int)
+@click.option("--json", "as_json", is_flag=True, help="Output JSON.")
+def cmd_free(port: int, as_json: bool) -> None:
+    """Free a port regardless of what is using it (managed, Docker, or unmanaged)."""
+    root = _require_project()
+    config = Config(root=root)
+
+    result = free_port(config, port)
+
+    if as_json:
+        click.echo(json.dumps(result))
+    else:
+        was = result["was"]
+        if was == "free":
+            click.echo(f"Port {port} is already free.")
+        else:
+            click.echo(f"Freed port {port} ({was}).")
 
 
 @main.command("next")
