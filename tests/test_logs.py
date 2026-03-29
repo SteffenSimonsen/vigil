@@ -1,11 +1,60 @@
-"""Tests for logs module — open_log and trim_log."""
+"""Tests for logs module — open_log, trim_log, read_log, follow_log."""
 
 from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
 
 from vigil.config import Config
-from vigil.logs import trim_log
+from vigil.logs import LogNotFound, follow_log, read_log, trim_log
+
+
+class TestReadLog:
+    def test_read_log_returns_last_n_lines(self, tmp_path: Path) -> None:
+        cfg = Config(root=tmp_path)
+        cfg.logs_dir.mkdir(parents=True)
+        log_path = cfg.logs_dir / "web.log"
+        lines = [f"line {i}\n" for i in range(1, 201)]
+        log_path.write_text("".join(lines))
+
+        result = read_log(cfg, "web", tail=10)
+
+        assert result == [f"line {i}" for i in range(191, 201)]
+
+    def test_read_log_raises_when_log_missing(self, tmp_path: Path) -> None:
+        cfg = Config(root=tmp_path)
+        cfg.logs_dir.mkdir(parents=True)
+
+        import pytest
+
+        with pytest.raises(LogNotFound):
+            read_log(cfg, "unknown")
+
+    def test_follow_log_yields_new_lines(self, tmp_path: Path) -> None:
+        cfg = Config(root=tmp_path)
+        cfg.logs_dir.mkdir(parents=True)
+        log_path = cfg.logs_dir / "web.log"
+        log_path.write_text("")
+
+        collected: list[str] = []
+        stop_event = threading.Event()
+
+        def _collect() -> None:
+            for line in follow_log(cfg, "web", stop=stop_event):
+                collected.append(line)
+
+        t = threading.Thread(target=_collect, daemon=True)
+        t.start()
+
+        time.sleep(0.05)
+        log_path.write_text("hello\nworld\n")
+        time.sleep(0.3)
+        stop_event.set()
+        t.join(timeout=2)
+
+        assert "hello" in collected
+        assert "world" in collected
 
 
 class TestTrimLog:
