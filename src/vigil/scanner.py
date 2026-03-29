@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import contextlib
-from typing import TypedDict
+from typing import TYPE_CHECKING, TypedDict
 
 import psutil
+
+if TYPE_CHECKING:
+    from vigil.docker import DockerInfo
 
 
 class Listener(TypedDict):
     port: int
     pid: int | None
     process: str | None
-    docker: None
+    docker: DockerInfo | None
 
 
 def _snapshot() -> list[Listener]:

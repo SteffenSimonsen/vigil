@@ -10,6 +10,8 @@ from typing import Any
 import click
 
 from vigil.config import Config, ConfigError, find_vigil_root
+from vigil.docker import enrich as docker_enrich
+from vigil.docker import lookup as docker_lookup
 from vigil.init import init_project, parse_process_spec, prompt_for_processes
 from vigil.logs import LogNotFound, read_log
 from vigil.manager import ProcessAlreadyRunning, ProcessCrashed, ProcessNotFound
@@ -319,13 +321,15 @@ def cmd_status(as_json: bool) -> None:
     managed: list[dict[str, Any]] = []
     for record in records:
         if record.alive:
+            entry_ports = ports_for_pid(record.pid)
             managed.append(
                 {
                     "name": record.name,
                     "command": record.command,
                     "pid": record.pid,
                     "alive": True,
-                    "ports": ports_for_pid(record.pid),
+                    "ports": entry_ports,
+                    "docker": docker_lookup(entry_ports),
                 }
             )
         else:
@@ -337,6 +341,7 @@ def cmd_status(as_json: bool) -> None:
                     "alive": False,
                     "crashed": True,
                     "ports": [],
+                    "docker": None,
                 }
             )
 
@@ -382,6 +387,8 @@ def cmd_scan(
     else:
         listeners = scan_ports(_DEFAULT_DEV_PORTS)
 
+    docker_enrich(listeners)
+
     if as_json:
         click.echo(json.dumps({"listeners": list(listeners)}, indent=2))
     else:
@@ -390,7 +397,16 @@ def cmd_scan(
             return
         for entry in listeners:
             proc = entry["process"] or "?"
-            click.echo(f"  :{entry['port']:<6} pid {entry['pid']}  {proc}")
+            docker = entry["docker"]
+            if docker:
+                docker_suffix = (
+                    f"  [{docker['container_name']}  {docker['image']}"
+                    + (f"  {docker['compose_service']}" if docker["compose_service"] else "")
+                    + "]"
+                )
+            else:
+                docker_suffix = ""
+            click.echo(f"  :{entry['port']:<6} pid {entry['pid']}  {proc}{docker_suffix}")
 
 
 @main.command("next")

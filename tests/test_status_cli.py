@@ -13,6 +13,15 @@ from click.testing import CliRunner
 
 from vigil.cli import main
 
+_DOCKER_PS_LINE = json.dumps(
+    {
+        "Names": "myapp-postgres-1",
+        "Image": "postgres:16",
+        "Labels": "com.docker.compose.service=postgres,com.docker.compose.project=myapp",
+        "Ports": "0.0.0.0:5432->5432/tcp",
+    }
+)
+
 _MockAddr = namedtuple("MockAddr", ["ip", "port"])
 _MockConn = namedtuple("MockConn", ["fd", "family", "type", "laddr", "raddr", "status", "pid"])
 
@@ -177,3 +186,79 @@ class TestStatusCLIText:
             result = runner.invoke(main, ["status"], catch_exceptions=False)
             assert result.exit_code == 0
             assert "No managed processes" in result.output
+
+
+class TestStatusDockerEnrichment:
+    def test_alive_container_process_includes_docker_in_json(self, runner: CliRunner) -> None:
+        """vigil status --json includes docker object when process is a container."""
+        start_time = time.time() - 10
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            _write_state(
+                Path(".vigil"),
+                {
+                    "db": {
+                        "name": "db",
+                        "pid": 9921,
+                        "command": "docker compose up db",
+                        "started_at": start_time,
+                        "port": 5432,
+                        "cwd": None,
+                    }
+                },
+            )
+            mock_proc = MagicMock()
+            mock_proc.create_time.return_value = start_time + 0.1
+            conn = _make_conn(9921, 5432)
+
+            with (
+                patch("psutil.pid_exists", return_value=True),
+                patch("psutil.Process", return_value=mock_proc),
+                patch("psutil.net_connections", return_value=[conn]),
+                patch("shutil.which", return_value="/usr/bin/docker"),
+                patch("subprocess.run") as mock_run,
+            ):
+                mock_run.return_value.stdout = _DOCKER_PS_LINE + "\n"
+                result = runner.invoke(main, ["status", "--json"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        entry = data["managed"][0]
+        assert entry["docker"] is not None
+        assert entry["docker"]["container_name"] == "myapp-postgres-1"
+        assert entry["docker"]["image"] == "postgres:16"
+
+    def test_native_process_has_docker_null_in_json(self, runner: CliRunner) -> None:
+        """vigil status --json has docker=null for non-container processes."""
+        start_time = time.time() - 10
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            _write_state(
+                Path(".vigil"),
+                {
+                    "web": {
+                        "name": "web",
+                        "pid": 1234,
+                        "command": "python -m http.server",
+                        "started_at": start_time,
+                        "port": 8000,
+                        "cwd": None,
+                    }
+                },
+            )
+            mock_proc = MagicMock()
+            mock_proc.create_time.return_value = start_time + 0.1
+            conn = _make_conn(1234, 8000)
+
+            with (
+                patch("psutil.pid_exists", return_value=True),
+                patch("psutil.Process", return_value=mock_proc),
+                patch("psutil.net_connections", return_value=[conn]),
+                patch("shutil.which", return_value=None),
+            ):
+                result = runner.invoke(main, ["status", "--json"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        entry = data["managed"][0]
+        assert entry["docker"] is None

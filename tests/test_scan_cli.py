@@ -10,6 +10,15 @@ from click.testing import CliRunner
 
 from vigil.cli import main
 
+_DOCKER_PS_LINE = json.dumps(
+    {
+        "Names": "myapp-postgres-1",
+        "Image": "postgres:16",
+        "Labels": "com.docker.compose.service=postgres,com.docker.compose.project=myapp",
+        "Ports": "0.0.0.0:5432->5432/tcp",
+    }
+)
+
 _MockAddr = namedtuple("MockAddr", ["ip", "port"])
 _MockConn = namedtuple("MockConn", ["fd", "family", "type", "laddr", "raddr", "status", "pid"])
 
@@ -107,6 +116,63 @@ class TestVigilScan:
         ports = [entry["port"] for entry in data["listeners"]]
         assert 1234 in ports
         assert 55555 in ports
+
+
+class TestVigilScanDockerEnrichment:
+    def test_scan_json_enriches_container_backed_port(self) -> None:
+        """vigil scan --json sets docker object for container-backed ports."""
+        conns = [_make_conn(9921, 5432)]
+        runner = CliRunner()
+        with (
+            patch("psutil.net_connections", return_value=conns),
+            patch("psutil.Process") as mock_proc,
+            patch("shutil.which", return_value="/usr/bin/docker"),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_proc.return_value.name.return_value = "docker-proxy"
+            mock_run.return_value.stdout = _DOCKER_PS_LINE + "\n"
+            result = runner.invoke(main, ["scan", "--port", "5432", "--json"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        listener = data["listeners"][0]
+        assert listener["docker"] is not None
+        assert listener["docker"]["container_name"] == "myapp-postgres-1"
+        assert listener["docker"]["image"] == "postgres:16"
+        assert listener["docker"]["compose_service"] == "postgres"
+        assert listener["docker"]["compose_project"] == "myapp"
+
+    def test_scan_json_docker_null_for_native_process(self) -> None:
+        """vigil scan --json keeps docker=null for native (non-container) ports."""
+        conns = [_make_conn(1234, 3000)]
+        runner = CliRunner()
+        with (
+            patch("psutil.net_connections", return_value=conns),
+            patch("psutil.Process") as mock_proc,
+            patch("shutil.which", return_value=None),
+        ):
+            mock_proc.return_value.name.return_value = "node"
+            result = runner.invoke(main, ["scan", "--port", "3000", "--json"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["listeners"][0]["docker"] is None
+
+    def test_scan_human_shows_container_name_and_image(self) -> None:
+        """vigil scan human output includes container name, image, and compose service."""
+        conns = [_make_conn(9921, 5432)]
+        runner = CliRunner()
+        with (
+            patch("psutil.net_connections", return_value=conns),
+            patch("psutil.Process") as mock_proc,
+            patch("shutil.which", return_value="/usr/bin/docker"),
+            patch("subprocess.run") as mock_run,
+        ):
+            mock_proc.return_value.name.return_value = "docker-proxy"
+            mock_run.return_value.stdout = _DOCKER_PS_LINE + "\n"
+            result = runner.invoke(main, ["scan", "--port", "5432"])
+        assert result.exit_code == 0, result.output
+        assert "myapp-postgres-1" in result.output
+        assert "postgres:16" in result.output
+        assert "postgres" in result.output
 
 
 class TestVigilNext:
