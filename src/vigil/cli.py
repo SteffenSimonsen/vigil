@@ -25,6 +25,10 @@ from vigil.manager import stop_all as manager_stop_all
 from vigil.open import UnknownProcess, resolve_url
 from vigil.scanner import next_free_port, ports_for_pid, scan_all, scan_ports
 from vigil.state import StateManager
+from vigil.vigilfile import ParseError as VigilfileParseError
+from vigil.vigilfile import down as vigilfile_down
+from vigil.vigilfile import load as vigilfile_load
+from vigil.vigilfile import up as vigilfile_up
 from vigil.wait import ProcessDied, WaitTimeout, wait_for_ready
 
 _DEFAULT_DEV_PORTS: list[int] = [
@@ -503,3 +507,77 @@ def cmd_next(start: int, count: int, as_json: bool) -> None:
             assert isinstance(result, list)
             for p in result:
                 click.echo(str(p))
+
+
+@main.command("up")
+@click.option(
+    "--only",
+    "only_names",
+    default=None,
+    metavar="NAME,...",
+    help="Comma-separated subset of processes to start.",
+)
+@click.option("--force", is_flag=True, help="Restart processes even if already running.")
+@click.option("--json", "as_json", is_flag=True, help="Output JSON.")
+def cmd_up(only_names: str | None, force: bool, as_json: bool) -> None:
+    """Start all Vigilfile processes in order."""
+    root = _require_project()
+    config = Config(root=root)
+
+    try:
+        entries = vigilfile_load(root)
+    except VigilfileParseError as e:
+        click.echo(str(e), err=True)
+        sys.exit(1)
+
+    only: list[str] | None = [n.strip() for n in only_names.split(",")] if only_names else None
+    results = vigilfile_up(config, entries, only=only, force=force)
+
+    if as_json:
+        click.echo(json.dumps({"processes": results}, indent=2))
+        return
+
+    for r in results:
+        status = r["status"]
+        name = r["name"]
+        if status == "started":
+            click.echo(f"  {name}: started (pid {r['pid']})")
+        elif status == "skipped":
+            click.echo(f"  {name}: already running, skipped")
+        else:
+            click.echo(f"  {name}: failed — {r['error']}")
+
+
+@main.command("down")
+@click.option(
+    "--only",
+    "only_names",
+    default=None,
+    metavar="NAME,...",
+    help="Comma-separated subset of processes to stop.",
+)
+@click.option("--json", "as_json", is_flag=True, help="Output JSON.")
+def cmd_down(only_names: str | None, as_json: bool) -> None:
+    """Stop all Vigilfile processes in reverse order."""
+    root = _require_project()
+    config = Config(root=root)
+
+    try:
+        entries = vigilfile_load(root)
+    except VigilfileParseError as e:
+        click.echo(str(e), err=True)
+        sys.exit(1)
+
+    only: list[str] | None = [n.strip() for n in only_names.split(",")] if only_names else None
+    results = vigilfile_down(config, entries, only=only)
+
+    if as_json:
+        click.echo(json.dumps({"processes": results}, indent=2))
+        return
+
+    for r in results:
+        name = r["name"]
+        if r["status"] == "stopped":
+            click.echo(f"  {name}: stopped")
+        else:
+            click.echo(f"  {name}: not running")
