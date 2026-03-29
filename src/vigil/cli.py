@@ -31,6 +31,7 @@ from vigil.vigilfile import down as vigilfile_down
 from vigil.vigilfile import load as vigilfile_load
 from vigil.vigilfile import up as vigilfile_up
 from vigil.wait import ProcessDied, WaitTimeout, wait_for_ready
+from vigil.wait import ProcessNotFound as WaitProcessNotFound
 
 
 def _complete_process_names(
@@ -335,6 +336,12 @@ def cmd_wait(
 
     try:
         wait_for_ready(config, name, timeout=timeout, port=port_override, http_path=http_path)
+    except WaitProcessNotFound as e:
+        if as_json:
+            click.echo(json.dumps({"error": str(e), "code": 1}))
+        else:
+            click.echo(str(e), err=True)
+        sys.exit(1)
     except ProcessDied as e:
         if as_json:
             click.echo(json.dumps({"name": name, "status": "died", "error": str(e)}))

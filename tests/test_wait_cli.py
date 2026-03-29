@@ -122,6 +122,15 @@ class TestWaitCLI:
                 )
             assert result.exit_code == 0
 
+    def test_exits_1_when_name_not_in_statefile(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            result = runner.invoke(main, ["wait", "doesnotexist", "--timeout", "5", "--json"])
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert data["error"] == "No managed process named 'doesnotexist'"
+            assert data["code"] == 1
+
     def test_port_override(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()

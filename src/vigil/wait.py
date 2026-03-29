@@ -20,6 +20,10 @@ class ProcessDied(Exception):
     """Raised when the process dies while waiting for readiness."""
 
 
+class ProcessNotFound(Exception):
+    """Raised when the name is not in the statefile at all."""
+
+
 def wait_for_ready(
     config: Config,
     name: str,
@@ -45,7 +49,9 @@ def wait_for_ready(
 
     while True:
         records = {r.name: r for r in state.read_all()}
-        if name not in records or not records[name].alive:
+        if name not in records:
+            raise ProcessNotFound(f"No managed process named {name!r}")
+        if not records[name].alive:
             raise ProcessDied(f"Process {name!r} died while waiting for readiness.")
 
         pid = records[name].pid
