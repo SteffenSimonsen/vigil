@@ -117,7 +117,29 @@ class TestWaitCLI:
                 respx.get("http://localhost:8080/health").mock(return_value=httpx.Response(200))
                 result = runner.invoke(
                     main,
-                    ["wait", "web", "--http-path=/health", "--timeout", "5"],
+                    ["wait", "web", "--http=/health", "--timeout", "5"],
+                    catch_exceptions=False,
+                )
+            assert result.exit_code == 0
+
+    def test_http_inline_path_syntax(self, runner: CliRunner) -> None:
+        """--http=/health should check /health (spec syntax, was broken)."""
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            cfg = Config(root=Path("."))
+            StateManager(cfg).write(
+                ProcessRecord(name="web", pid=12345, command="...", started_at=1000.0)
+            )
+            with (
+                patch("psutil.pid_exists", return_value=True),
+                patch("psutil.Process", return_value=_alive_proc_mock()),
+                patch("psutil.net_connections", return_value=[_listen_conn(12345, 8080)]),
+                respx.mock,
+            ):
+                respx.get("http://localhost:8080/health").mock(return_value=httpx.Response(200))
+                result = runner.invoke(
+                    main,
+                    ["wait", "web", "--http=/health", "--timeout", "5"],
                     catch_exceptions=False,
                 )
             assert result.exit_code == 0
