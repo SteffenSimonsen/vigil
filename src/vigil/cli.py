@@ -22,6 +22,7 @@ from vigil.manager import restart as manager_restart
 from vigil.manager import start as manager_start
 from vigil.manager import stop as manager_stop
 from vigil.manager import stop_all as manager_stop_all
+from vigil.open import UnknownProcess, resolve_url
 from vigil.scanner import next_free_port, ports_for_pid, scan_all, scan_ports
 from vigil.state import StateManager
 from vigil.wait import ProcessDied, WaitTimeout, wait_for_ready
@@ -456,6 +457,30 @@ def cmd_free(port: int, as_json: bool) -> None:
             click.echo(f"Port {port} is already free.")
         else:
             click.echo(f"Freed port {port} ({was}).")
+
+
+@main.command("open")
+@click.argument("target")
+@click.option("--json", "as_json", is_flag=True, help="Output JSON without opening a browser.")
+def cmd_open(target: str, as_json: bool) -> None:
+    """Open a service or port in the browser."""
+    root = _require_project()
+    config = Config(root=root)
+
+    try:
+        url = resolve_url(config, target)
+    except UnknownProcess as e:
+        click.echo(str(e), err=True)
+        sys.exit(1)
+
+    if as_json:
+        click.echo(json.dumps({"url": url}))
+        return
+
+    import webbrowser
+
+    webbrowser.open(url)
+    click.echo(f"Opening {url}")
 
 
 @main.command("next")
