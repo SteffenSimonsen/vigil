@@ -62,6 +62,9 @@ def start(
                     f"Process {name!r} crashed (pid {rec.pid}). Use --force to start a fresh one."
                 )
 
+    if not command.strip():
+        raise ValueError("Command cannot be empty")
+
     effective_cwd = Path(cwd) if cwd else config.root
     log_file = open_log(config, name)
     try:
