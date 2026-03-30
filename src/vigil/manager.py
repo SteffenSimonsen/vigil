@@ -117,13 +117,16 @@ def start(
     return record
 
 
-def stop(config: Config, name: str) -> None:
+def stop(config: Config, name: str) -> str:
     """Stop a managed process by *name*.
 
     Sends SIGTERM, waits up to the configured grace period, then SIGKILL if
     still alive. Removes the statefile entry and trims the log file.
     Idempotent — succeeds silently if the process is already dead.
     Raises ProcessNotFound if *name* is not in the statefile.
+
+    Returns ``"stopped"`` if the process was alive when called, or
+    ``"cleaned_up"`` if it had already exited.
     """
     state = StateManager(config)
     existing = {r.name: r for r in state.read_all()}
@@ -132,11 +135,14 @@ def stop(config: Config, name: str) -> None:
         raise ProcessNotFound(f"No managed process named {name!r}.")
 
     record = existing[name]
-    if record.alive:
+    was_alive = record.alive
+    if was_alive:
         _stop_process(record, grace=config.stop_grace_period)
 
     state.delete(name)
     trim_log(config, name, max_lines=config.log_retention_lines)
+
+    return "stopped" if was_alive else "cleaned_up"
 
 
 def restart(config: Config, name: str) -> ProcessRecord:
@@ -182,16 +188,19 @@ def remove(config: Config, name: str, *, force: bool = False) -> None:
     state.delete(name)
 
 
-def stop_all(config: Config) -> list[str]:
+def stop_all(config: Config) -> list[dict[str, str]]:
     """Stop all managed processes.
 
-    Returns the list of names that were stopped.
+    Returns a list of ``{"name": ..., "status": ...}`` dicts where *status* is
+    ``"stopped"`` if the process was alive, or ``"cleaned_up"`` if already dead.
     """
     state = StateManager(config)
     names = [r.name for r in state.read_all()]
+    results: list[dict[str, str]] = []
     for name in names:
-        stop(config, name)
-    return names
+        status = stop(config, name)
+        results.append({"name": name, "status": status})
+    return results
 
 
 def _stop_process(record: ProcessRecord, grace: int = 5) -> None:

@@ -34,6 +34,21 @@ class TestStop:
         state = StateManager(config)
         assert state.read_all() == []
 
+    def test_stop_all_returns_per_process_status(self, config: Config) -> None:
+        live = start(config, "web", "python -c 'import time; time.sleep(30)'")
+        dead = start(config, "worker", "python -c 'pass'")
+        with contextlib.suppress(psutil.NoSuchProcess, psutil.TimeoutExpired):
+            psutil.Process(dead.pid).wait(timeout=5)
+        time.sleep(0.1)
+
+        results = stop_all(config)
+
+        by_name = {r["name"]: r["status"] for r in results}
+        assert by_name["web"] == "stopped"
+        assert by_name["worker"] == "cleaned_up"
+        with contextlib.suppress(psutil.NoSuchProcess):
+            psutil.Process(live.pid).kill()
+
     def test_stop_trims_log_after_stopping(self, config: Config) -> None:
         record = start(config, "web", "python -c 'pass'")
         with contextlib.suppress(psutil.NoSuchProcess, psutil.TimeoutExpired):
@@ -82,6 +97,23 @@ class TestStop:
 
         state = StateManager(config)
         assert not any(r.name == "web" for r in state.read_all())
+
+    def test_stop_returns_cleaned_up_for_already_dead_process(self, config: Config) -> None:
+        record = start(config, "web", "python -c 'pass'")
+        with contextlib.suppress(psutil.NoSuchProcess, psutil.TimeoutExpired):
+            psutil.Process(record.pid).wait(timeout=5)
+        time.sleep(0.1)
+
+        result = stop(config, "web")
+
+        assert result == "cleaned_up"
+
+    def test_stop_returns_stopped_for_live_process(self, config: Config) -> None:
+        start(config, "web", "python -c 'import time; time.sleep(30)'")
+
+        result = stop(config, "web")
+
+        assert result == "stopped"
 
     def test_stop_kills_alive_process_and_removes_statefile_entry(self, config: Config) -> None:
         record = start(config, "web", "python -c 'import time; time.sleep(30)'")

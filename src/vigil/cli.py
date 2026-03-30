@@ -207,17 +207,21 @@ def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool) -> None:
 
     if stop_all_flag:
         try:
-            names = manager_stop_all(config)
+            results = manager_stop_all(config)
         except StateCorruptedError as e:
             if as_json:
                 _json_error(str(e))
             click.echo(str(e), err=True)
             sys.exit(1)
         if as_json:
-            click.echo(json.dumps({"status": "stopped", "names": names}))
+            click.echo(json.dumps({"processes": results}))
         else:
-            if names:
-                click.echo(f"Stopped {len(names)} process(es): {', '.join(names)}")
+            if results:
+                for r in results:
+                    if r["status"] == "stopped":
+                        click.echo(f"  \u2713 {r['name']} stopped")
+                    else:
+                        click.echo(f"  \u2713 {r['name']} cleaned up (was crashed)")
             else:
                 click.echo("No managed processes to stop.")
         return
@@ -229,7 +233,7 @@ def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool) -> None:
         sys.exit(1)
 
     try:
-        manager_stop(config, name)
+        status = manager_stop(config, name)
     except StateCorruptedError as e:
         if as_json:
             _json_error(str(e))
@@ -242,9 +246,12 @@ def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool) -> None:
         sys.exit(1)
 
     if as_json:
-        click.echo(json.dumps({"name": name, "status": "stopped"}))
+        click.echo(json.dumps({"name": name, "status": status}))
     else:
-        click.echo(f"Stopped {name!r}")
+        if status == "stopped":
+            click.echo(f"Stopped {name!r}")
+        else:
+            click.echo(f"Cleaned up {name!r} (was crashed)")
 
 
 @main.command("restart")
