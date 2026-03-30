@@ -23,7 +23,7 @@ from vigil.manager import restart as manager_restart
 from vigil.manager import start as manager_start
 from vigil.manager import stop as manager_stop
 from vigil.manager import stop_all as manager_stop_all
-from vigil.open import UnknownProcess, resolve_url
+from vigil.open import NoPortFound, UnknownProcess, resolve_url
 from vigil.scanner import next_free_port, ports_for_pid, scan_all, scan_ports
 from vigil.state import StateCorruptedError, StateManager
 from vigil.vigilfile import ParseError as VigilfileParseError
@@ -613,6 +613,11 @@ def cmd_open(target: str, as_json: bool) -> None:
         click.echo(str(e), err=True)
         sys.exit(1)
     except UnknownProcess as e:
+        if as_json:
+            _json_error(str(e))
+        click.echo(str(e), err=True)
+        sys.exit(1)
+    except NoPortFound as e:
         if as_json:
             _json_error(str(e))
         click.echo(str(e), err=True)

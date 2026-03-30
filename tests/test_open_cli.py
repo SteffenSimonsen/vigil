@@ -62,6 +62,33 @@ class TestOpenErrors:
         assert result.exit_code != 0
         assert "nonexistent" in result.output or "nonexistent" in (result.stderr or "")
 
+    def test_open_no_port_exits_with_error(self, runner: CliRunner) -> None:
+        """vigil open <name> exits 1 with clean error when process has no port."""
+        import json as _json
+        from unittest.mock import patch
+
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            state = {
+                "noport": {
+                    "name": "noport",
+                    "pid": 99999,
+                    "command": "sleep 300",
+                    "started_at": 0.0,
+                    "port": None,
+                    "cwd": None,
+                }
+            }
+            Path(".vigil/state.json").write_text(_json.dumps(state))
+            with patch("psutil.net_connections", return_value=[]):
+                result = runner.invoke(main, ["open", "noport", "--json"])
+
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert "error" in data
+        assert "noport" in data["error"]
+        assert "http://localhost:None" not in result.output
+
 
 class TestOpenBrowser:
     def test_open_port_opens_browser(self, runner: CliRunner) -> None:

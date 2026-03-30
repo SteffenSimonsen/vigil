@@ -11,6 +11,10 @@ class UnknownProcess(Exception):
     """Raised when a process name is not found in the statefile."""
 
 
+class NoPortFound(Exception):
+    """Raised when a process has no known port."""
+
+
 def resolve_url(config: Config, target: str) -> str:
     """Resolve the URL for a target (name or port).
 
@@ -37,7 +41,7 @@ def resolve_url(config: Config, target: str) -> str:
             live_ports = ports_for_pid(record.pid)
             if live_ports:
                 return f"http://localhost:{live_ports[0]}"
-            return f"http://localhost:{record.port}"
+            raise NoPortFound(f"No port found for process {target!r}")
 
     raise UnknownProcess(f"No process named {target!r}")
 
