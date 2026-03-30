@@ -25,7 +25,7 @@ from vigil.manager import stop as manager_stop
 from vigil.manager import stop_all as manager_stop_all
 from vigil.open import UnknownProcess, resolve_url
 from vigil.scanner import next_free_port, ports_for_pid, scan_all, scan_ports
-from vigil.state import StateManager
+from vigil.state import StateCorruptedError, StateManager
 from vigil.vigilfile import ParseError as VigilfileParseError
 from vigil.vigilfile import down as vigilfile_down
 from vigil.vigilfile import load as vigilfile_load
@@ -169,6 +169,11 @@ def cmd_start(
 
     try:
         record = manager_start(config, name, command, force=force, env=env, cwd=cwd)
+    except StateCorruptedError as e:
+        if as_json:
+            _json_error(str(e))
+        click.echo(str(e), err=True)
+        sys.exit(1)
     except ProcessAlreadyRunning as e:
         if as_json:
             _json_error(str(e))
@@ -201,7 +206,13 @@ def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool) -> None:
     config = Config(root=root)
 
     if stop_all_flag:
-        names = manager_stop_all(config)
+        try:
+            names = manager_stop_all(config)
+        except StateCorruptedError as e:
+            if as_json:
+                _json_error(str(e))
+            click.echo(str(e), err=True)
+            sys.exit(1)
         if as_json:
             click.echo(json.dumps({"status": "stopped", "names": names}))
         else:
@@ -219,6 +230,11 @@ def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool) -> None:
 
     try:
         manager_stop(config, name)
+    except StateCorruptedError as e:
+        if as_json:
+            _json_error(str(e))
+        click.echo(str(e), err=True)
+        sys.exit(1)
     except ProcessNotFound as e:
         if as_json:
             _json_error(str(e))
@@ -241,6 +257,11 @@ def cmd_restart(name: str, as_json: bool) -> None:
 
     try:
         record = manager_restart(config, name)
+    except StateCorruptedError as e:
+        if as_json:
+            _json_error(str(e))
+        click.echo(str(e), err=True)
+        sys.exit(1)
     except ProcessNotFound as e:
         if as_json:
             _json_error(str(e))
@@ -269,6 +290,11 @@ def cmd_remove(name: str, force: bool, as_json: bool) -> None:
 
     try:
         manager_remove(config, name, force=force)
+    except StateCorruptedError as e:
+        if as_json:
+            _json_error(str(e))
+        click.echo(str(e), err=True)
+        sys.exit(1)
     except ProcessNotFound as e:
         if as_json:
             _json_error(str(e))
@@ -367,6 +393,11 @@ def cmd_wait(
 
     try:
         wait_for_ready(config, name, timeout=timeout, port=port_override, http_path=http_path)
+    except StateCorruptedError as e:
+        if as_json:
+            _json_error(str(e))
+        click.echo(str(e), err=True)
+        sys.exit(1)
     except WaitProcessNotFound as e:
         if as_json:
             click.echo(json.dumps({"error": str(e), "code": 1}))
@@ -398,7 +429,13 @@ def cmd_status(as_json: bool) -> None:
     """Show status of all managed processes."""
     root = _require_project()
     config = Config(root=root)
-    records = StateManager(config).read_all()
+    try:
+        records = StateManager(config).read_all()
+    except StateCorruptedError as e:
+        if as_json:
+            _json_error(str(e))
+        click.echo(str(e), err=True)
+        sys.exit(1)
 
     managed: list[dict[str, Any]] = []
     for record in records:
@@ -510,7 +547,13 @@ def cmd_health(endpoint: str, timeout_sec: float | None, as_json: bool) -> None:
     root = _require_project()
     config = Config(root=root)
 
-    results = check_health(config, endpoint=endpoint, timeout=timeout_sec)
+    try:
+        results = check_health(config, endpoint=endpoint, timeout=timeout_sec)
+    except StateCorruptedError as e:
+        if as_json:
+            _json_error(str(e))
+        click.echo(str(e), err=True)
+        sys.exit(1)
 
     if as_json:
         click.echo(json.dumps({"processes": list(results)}, indent=2))
@@ -536,7 +579,13 @@ def cmd_free(port: int, as_json: bool) -> None:
     root = _require_project()
     config = Config(root=root)
 
-    result = free_port(config, port)
+    try:
+        result = free_port(config, port)
+    except StateCorruptedError as e:
+        if as_json:
+            _json_error(str(e))
+        click.echo(str(e), err=True)
+        sys.exit(1)
 
     if as_json:
         click.echo(json.dumps(result))
@@ -558,6 +607,11 @@ def cmd_open(target: str, as_json: bool) -> None:
 
     try:
         url = resolve_url(config, target)
+    except StateCorruptedError as e:
+        if as_json:
+            _json_error(str(e))
+        click.echo(str(e), err=True)
+        sys.exit(1)
     except UnknownProcess as e:
         if as_json:
             _json_error(str(e))
@@ -620,7 +674,13 @@ def cmd_up(only_names: str | None, force: bool, as_json: bool) -> None:
         sys.exit(1)
 
     only: list[str] | None = [n.strip() for n in only_names.split(",")] if only_names else None
-    results = vigilfile_up(config, entries, only=only, force=force)
+    try:
+        results = vigilfile_up(config, entries, only=only, force=force)
+    except StateCorruptedError as e:
+        if as_json:
+            _json_error(str(e))
+        click.echo(str(e), err=True)
+        sys.exit(1)
 
     if as_json:
         click.echo(json.dumps({"processes": results}, indent=2))
@@ -660,7 +720,13 @@ def cmd_down(only_names: str | None, as_json: bool) -> None:
         sys.exit(1)
 
     only: list[str] | None = [n.strip() for n in only_names.split(",")] if only_names else None
-    results = vigilfile_down(config, entries, only=only)
+    try:
+        results = vigilfile_down(config, entries, only=only)
+    except StateCorruptedError as e:
+        if as_json:
+            _json_error(str(e))
+        click.echo(str(e), err=True)
+        sys.exit(1)
 
     if as_json:
         click.echo(json.dumps({"processes": results}, indent=2))

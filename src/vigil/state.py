@@ -13,6 +13,11 @@ import psutil
 
 from vigil.config import Config
 
+
+class StateCorruptedError(Exception):
+    """Raised when state.json is corrupted or unreadable."""
+
+
 # How many seconds of tolerance to allow between recorded started_at and
 # the process's actual create_time (clocks differ slightly between APIs).
 _START_TIME_TOLERANCE = 2.0
@@ -73,8 +78,16 @@ class StateManager:
     def _load_raw(self) -> dict[str, Any]:
         if not self.config.state_file.exists():
             return {}
-        with self.config.state_file.open() as f:
-            return json.load(f)  # type: ignore[no-any-return]
+        try:
+            with self.config.state_file.open() as f:
+                data = json.load(f)
+        except PermissionError as e:
+            raise StateCorruptedError("State file is corrupted or unreadable") from e
+        except json.JSONDecodeError as e:
+            raise StateCorruptedError("State file is corrupted or unreadable") from e
+        if not isinstance(data, dict):
+            raise StateCorruptedError("State file is corrupted or unreadable")
+        return data  # type: ignore[no-any-return]
 
     def _save_raw(self, data: dict[str, Any]) -> None:
         """Write atomically via a temp file and os.rename."""
@@ -94,10 +107,13 @@ class StateManager:
         """Return all records, each annotated with live PID status."""
         raw = self._load_raw()
         records: list[ProcessRecord] = []
-        for item in raw.values():
-            record = ProcessRecord.from_dict(item)
-            record.alive = _is_pid_alive(record.pid, record.started_at)
-            records.append(record)
+        try:
+            for item in raw.values():
+                record = ProcessRecord.from_dict(item)
+                record.alive = _is_pid_alive(record.pid, record.started_at)
+                records.append(record)
+        except (KeyError, TypeError) as e:
+            raise StateCorruptedError("State file is corrupted or unreadable") from e
         return records
 
     def write(self, record: ProcessRecord) -> None:
