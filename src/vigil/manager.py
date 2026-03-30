@@ -65,6 +65,12 @@ def start(
     if not name.strip():
         raise ValueError("Process name cannot be empty.")
 
+    if len(name) > 200:
+        raise ValueError(
+            f"Process name is too long ({len(name)} characters)."
+            " Names must be 200 characters or fewer."
+        )
+
     if "/" in name or "\\" in name or name == "..":
         raise ValueError(
             f"Process name {name!r} is invalid. Names may not contain '/', '\\', or be '..'."

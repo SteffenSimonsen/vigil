@@ -244,6 +244,41 @@ class TestStartCLI:
             assert "error" in data
             assert data["code"] == 1
 
+    def test_start_name_longer_than_200_chars_exits_with_json_error(
+        self, runner: CliRunner
+    ) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            long_name = "a" * 201
+            result = runner.invoke(
+                main,
+                ["start", long_name, "sleep 300", "--json"],
+            )
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert data["code"] == 1
+
+    def test_start_name_exactly_200_chars_is_valid(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            name = "a" * 200
+            result = runner.invoke(
+                main,
+                ["start", name, "python -c 'import time; time.sleep(30)'", "--json"],
+                catch_exceptions=False,
+            )
+            pid: int | None = None
+            try:
+                assert result.exit_code == 0
+                data = json.loads(result.output)
+                pid = data["pid"]
+                assert data["name"] == name
+            finally:
+                if pid is not None:
+                    with contextlib.suppress(Exception):
+                        psutil.Process(pid).kill()
+
     def test_start_name_with_single_dot_is_valid(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()
