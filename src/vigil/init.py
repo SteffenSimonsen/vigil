@@ -24,6 +24,8 @@ def parse_process_spec(spec: str) -> ProcessDef:
     parts = spec.split(",", 2)
     name = parts[0].strip()
     command = parts[1].strip() if len(parts) > 1 else ""
+    if not command:
+        raise ValueError(f"Invalid process spec {spec!r}: expected format is name,command[,port].")
     port: int | None = None
     if len(parts) > 2 and parts[2].strip():
         port_str = parts[2].strip()

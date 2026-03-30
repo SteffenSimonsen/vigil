@@ -119,6 +119,27 @@ class TestInitExistingVigilfile:
 
 
 class TestInitBadProcessSpec:
+    def test_spec_with_no_command_exits_nonzero(self, runner: CliRunner, tmp_path: Path) -> None:
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(main, ["init", "--process", "myservice"])
+            assert result.exit_code == 1
+
+    def test_spec_with_no_command_json_error(self, runner: CliRunner, tmp_path: Path) -> None:
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            result = runner.invoke(main, ["init", "--process", "myservice", "--json"])
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert data["code"] == 1
+            assert "name,command" in data["error"]
+
+    def test_spec_with_no_command_does_not_write_vigilfile(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            runner.invoke(main, ["init", "--process", "myservice"])
+            assert not Path("Vigilfile").exists()
+
     def test_nonnumeric_port_exits_with_json_error(self, runner: CliRunner, tmp_path: Path) -> None:
         with runner.isolated_filesystem(temp_dir=tmp_path):
             result = runner.invoke(
