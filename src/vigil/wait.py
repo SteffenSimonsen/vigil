@@ -72,7 +72,7 @@ def wait_for_ready(
             try:
                 httpx.get(url, timeout=2.0)
                 return
-            except (httpx.RequestError, httpx.HTTPStatusError):
+            except (httpx.RequestError, httpx.HTTPStatusError, httpx.InvalidURL):
                 pass
 
         if time.monotonic() >= deadline:

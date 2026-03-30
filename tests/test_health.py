@@ -190,7 +190,24 @@ class TestCheckHealth:
 
         assert results[0]["healthy"] is False
 
-    # --- Cycle 9: multiple processes ---
+    # --- Cycle 9: httpx.InvalidURL is caught and reported ---
+
+    def test_invalid_url_caught_and_reported_as_unhealthy(self, cfg: Config) -> None:
+        _write_record(cfg, pid=12345)
+        with (
+            patch("psutil.pid_exists", return_value=True),
+            patch("psutil.Process", return_value=_alive_proc_mock()),
+            patch("psutil.net_connections", return_value=[_listen_conn(12345, 8080)]),
+            patch("httpx.get", side_effect=httpx.InvalidURL("bad url")),
+        ):
+            results = check_health(cfg)
+
+        assert len(results) == 1
+        r = results[0]
+        assert r["healthy"] is False
+        assert r["error"] is not None
+
+    # --- Cycle 11: multiple processes ---
 
     def test_multiple_processes_all_checked(self, cfg: Config) -> None:
         _write_record(cfg, name="web", pid=11111)

@@ -139,6 +139,20 @@ class TestWaitForReady:
         ):
             wait_for_ready(cfg, "web", timeout=5, interval=0.01, port=8081)
 
+    # --- Cycle 7: httpx.InvalidURL is caught (not propagated) ---
+
+    def test_invalid_url_does_not_crash_wait(self, cfg: Config) -> None:
+        """httpx.InvalidURL in HTTP check path is caught; wait times out rather than crashing."""
+        _write_record(cfg)
+        with (
+            patch("psutil.pid_exists", return_value=True),
+            patch("psutil.Process", return_value=_alive_proc_mock()),
+            patch("psutil.net_connections", return_value=[_listen_conn(12345, 8080)]),
+            patch("httpx.get", side_effect=httpx.InvalidURL("bad url")),
+            pytest.raises(WaitTimeout),
+        ):
+            wait_for_ready(cfg, "web", timeout=0.05, interval=0.01, http_path="/")
+
     def test_port_override_keeps_polling_when_wrong_port_listening(self, cfg: Config) -> None:
         """--port N does not satisfy readiness when a different port opens."""
         _write_record(cfg)

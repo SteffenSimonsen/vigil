@@ -70,7 +70,7 @@ def check_health(
                     error=None,
                 )
             )
-        except (httpx.RequestError, httpx.HTTPStatusError) as exc:
+        except (httpx.RequestError, httpx.HTTPStatusError, httpx.InvalidURL) as exc:
             latency_ms = (time.monotonic() - t0) * 1000
             results.append(
                 HealthResult(

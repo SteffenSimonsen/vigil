@@ -153,6 +153,31 @@ class TestWaitCLI:
             assert data["error"] == "No managed process named 'doesnotexist'"
             assert data["code"] == 1
 
+    # --- http path missing leading slash ---
+
+    def test_http_path_without_leading_slash_exits_1(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            cfg = Config(root=Path("."))
+            StateManager(cfg).write(
+                ProcessRecord(name="web", pid=12345, command="...", started_at=1000.0)
+            )
+            result = runner.invoke(main, ["wait", "web", "--http=no-slash"])
+            assert result.exit_code == 1
+            assert "Endpoint must start with /" in (result.output + (result.stderr or ""))
+
+    def test_http_path_without_leading_slash_json_error(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            cfg = Config(root=Path("."))
+            StateManager(cfg).write(
+                ProcessRecord(name="web", pid=12345, command="...", started_at=1000.0)
+            )
+            result = runner.invoke(main, ["wait", "web", "--http=no-slash", "--json"])
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+
     def test_port_override(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()

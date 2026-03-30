@@ -166,3 +166,20 @@ class TestHealthCLI:
             assert result.exit_code == 0
             data = json.loads(result.output)
             assert data == {"processes": []}
+
+    # --- Cycle 6: endpoint missing leading slash ---
+
+    def test_endpoint_without_leading_slash_exits_1(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            result = runner.invoke(main, ["health", "--endpoint", "no-slash"])
+            assert result.exit_code == 1
+            assert "Endpoint must start with /" in (result.output + (result.stderr or ""))
+
+    def test_endpoint_without_leading_slash_json_error(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            result = runner.invoke(main, ["health", "--endpoint", "no-slash", "--json"])
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data

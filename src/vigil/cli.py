@@ -388,6 +388,13 @@ def cmd_wait(
     Use --http to check for any HTTP response on / (the default path).
     Use --http=/health to check on a custom path.
     """
+    if http_path is not None and not http_path.startswith("/"):
+        if as_json:
+            click.echo(json.dumps({"error": "Endpoint must start with /"}))
+        else:
+            click.echo("Error: Endpoint must start with /")
+        sys.exit(1)
+
     root = _require_project()
     config = Config(root=root)
 
@@ -544,6 +551,13 @@ def cmd_scan(
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 def cmd_health(endpoint: str, timeout_sec: float | None, as_json: bool) -> None:
     """Check the health of all alive managed processes."""
+    if not endpoint.startswith("/"):
+        if as_json:
+            click.echo(json.dumps({"error": "Endpoint must start with /"}))
+        else:
+            click.echo("Error: Endpoint must start with /")
+        sys.exit(1)
+
     root = _require_project()
     config = Config(root=root)
 
