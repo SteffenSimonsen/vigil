@@ -232,6 +232,18 @@ class TestStartCLI:
             assert "error" in data
             assert data["code"] == 1
 
+    def test_start_empty_name_exits_with_json_error(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            result = runner.invoke(
+                main,
+                ["start", "", "sleep 300", "--json"],
+            )
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert data["code"] == 1
+
     def test_start_name_with_single_dot_is_valid(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()
