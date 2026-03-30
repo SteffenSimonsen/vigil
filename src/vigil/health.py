@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import socket
 import time
 from typing import TypedDict
 
@@ -21,6 +22,16 @@ class HealthResult(TypedDict):
     error: str | None
 
 
+def _tcp_check(port: int, timeout: float) -> tuple[bool, str | None]:
+    """Attempt a TCP connect to localhost:port. Returns (success, error_message)."""
+    try:
+        with socket.create_connection(("localhost", port), timeout=timeout):
+            pass
+        return True, None
+    except OSError as exc:
+        return False, str(exc)
+
+
 def check_health(
     config: Config,
     *,
@@ -32,6 +43,7 @@ def check_health(
     For each alive process:
     - If it has listening ports, sends a GET request to the first port at *endpoint*.
       Any HTTP response (including 4xx/5xx) counts as healthy.
+    - If HTTP fails, falls back to a TCP connect check.
     - If it has no listening ports, reports status "no-port" (treated as healthy).
 
     Returns a list of HealthResult dicts, one per alive process.
@@ -70,15 +82,17 @@ def check_health(
                     error=None,
                 )
             )
-        except (httpx.RequestError, httpx.HTTPStatusError, httpx.InvalidURL) as exc:
+        except (httpx.RequestError, httpx.HTTPStatusError, httpx.InvalidURL):
+            # HTTP failed — fall back to TCP connect
             latency_ms = (time.monotonic() - t0) * 1000
+            tcp_ok, tcp_err = _tcp_check(port, timeout=effective_timeout)
             results.append(
                 HealthResult(
                     name=record.name,
-                    healthy=False,
-                    status=None,
+                    healthy=tcp_ok,
+                    status="tcp-ok" if tcp_ok else None,
                     latency_ms=latency_ms,
-                    error=str(exc),
+                    error=None if tcp_ok else tcp_err,
                 )
             )
 

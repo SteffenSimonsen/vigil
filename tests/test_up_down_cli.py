@@ -177,8 +177,8 @@ class TestUpCLI:
             result = runner.invoke(main, ["up"])
             assert result.exit_code != 0
 
-    def test_up_any_failure_exits_one(self, runner: CliRunner) -> None:
-        """Any process failure causes exit 1."""
+    def test_up_any_failure_exits_two(self, runner: CliRunner) -> None:
+        """Any process failure causes exit 2 (partial success)."""
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()
             _write_vigilfile(Path("."), _two_process_vigilfile())
@@ -200,14 +200,14 @@ class TestUpCLI:
             ):
                 result = runner.invoke(main, ["up", "--json"], catch_exceptions=False)
 
-            assert result.exit_code == 1
+            assert result.exit_code == 2
             data = json.loads(result.output)
             statuses = {p["name"]: p["status"] for p in data["processes"]}
             assert statuses["db"] == "failed"
             assert statuses["api"] == "started"
 
-    def test_up_all_failures_exits_one(self, runner: CliRunner) -> None:
-        """All processes failing causes exit 1."""
+    def test_up_all_failures_exits_two(self, runner: CliRunner) -> None:
+        """All processes failing causes exit 2 (partial success)."""
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()
             _write_vigilfile(Path("."), _two_process_vigilfile())
@@ -224,7 +224,7 @@ class TestUpCLI:
             ):
                 result = runner.invoke(main, ["up", "--json"], catch_exceptions=False)
 
-            assert result.exit_code == 1
+            assert result.exit_code == 2
             data = json.loads(result.output)
             statuses = {p["name"]: p["status"] for p in data["processes"]}
             assert statuses["db"] == "failed"
