@@ -57,11 +57,17 @@ def next_free_port(start: int = 3000, count: int = 1) -> int | list[int]:
 
     Reads the OS socket table exactly once. Returns a single int when
     count=1, or a list[int] when count>1.
+
+    Raises ValueError if start > 65535 or no free ports exist below 65536.
     """
+    if start > 65535:
+        raise ValueError(f"start port {start} is above the maximum valid port 65535")
     occupied = {entry["port"] for entry in _snapshot()}
     found: list[int] = []
     port = start
     while len(found) < count:
+        if port > 65535:
+            raise ValueError("no free ports available below 65536")
         if port not in occupied:
             found.append(port)
         port += 1

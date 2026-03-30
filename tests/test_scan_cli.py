@@ -249,3 +249,26 @@ class TestVigilNext:
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         assert data["port"] == 3002
+
+    def test_next_start_above_65535_exits_1_with_json_error(self) -> None:
+        """vigil next 99999 --json exits 1 with a JSON error."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["next", "99999", "--json"])
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert "error" in data
+
+    def test_next_never_returns_port_above_65535(self) -> None:
+        """vigil next --count 3 starting at 65534 errors when search would exceed 65535."""
+        runner = CliRunner()
+        with patch("psutil.net_connections", return_value=[]):
+            result = runner.invoke(main, ["next", "65534", "--count", "3", "--json"])
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert "error" in data
+
+    def test_next_start_above_65535_text_mode_exits_1(self) -> None:
+        """vigil next 99999 (no --json) exits 1 with a human-readable error."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["next", "99999"])
+        assert result.exit_code == 1

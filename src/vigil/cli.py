@@ -653,7 +653,14 @@ def cmd_open(target: str, as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 def cmd_next(start: int, count: int, as_json: bool) -> None:
     """Find the next free port(s) starting from START (default 3000)."""
-    result = next_free_port(start, count=count)
+    try:
+        result = next_free_port(start, count=count)
+    except ValueError as exc:
+        if as_json:
+            click.echo(json.dumps({"error": str(exc), "code": 1}))
+        else:
+            click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1) from exc
 
     if as_json:
         if count == 1:
