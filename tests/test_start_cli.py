@@ -184,6 +184,73 @@ class TestStartCLI:
             assert "error" in data
             assert data["code"] == 1
 
+    def test_start_name_with_forward_slash_exits_with_json_error(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            result = runner.invoke(
+                main,
+                ["start", "proc/with/slash", "sleep 1", "--json"],
+            )
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert data["code"] == 1
+
+    def test_start_name_with_backslash_exits_with_json_error(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            result = runner.invoke(
+                main,
+                ["start", "proc\\evil", "sleep 1", "--json"],
+            )
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert data["code"] == 1
+
+    def test_start_name_with_dotdot_exits_with_json_error(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            result = runner.invoke(
+                main,
+                ["start", "../../../tmp/evil", "sleep 1", "--json"],
+            )
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert data["code"] == 1
+
+    def test_start_name_dotdot_alone_exits_with_json_error(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            result = runner.invoke(
+                main,
+                ["start", "..", "sleep 1", "--json"],
+            )
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert data["code"] == 1
+
+    def test_start_name_with_single_dot_is_valid(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            result = runner.invoke(
+                main,
+                ["start", "my.service", "python -c 'import time; time.sleep(30)'", "--json"],
+                catch_exceptions=False,
+            )
+            pid: int | None = None
+            try:
+                assert result.exit_code == 0
+                data = json.loads(result.output)
+                pid = data["pid"]
+                assert data["name"] == "my.service"
+            finally:
+                if pid is not None:
+                    with contextlib.suppress(Exception):
+                        psutil.Process(pid).kill()
+
     def test_start_env_flag(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()

@@ -62,6 +62,11 @@ def start(
                     f"Process {name!r} crashed (pid {rec.pid}). Use --force to start a fresh one."
                 )
 
+    if "/" in name or "\\" in name or name == "..":
+        raise ValueError(
+            f"Process name {name!r} is invalid. Names may not contain '/', '\\', or be '..'."
+        )
+
     if not command.strip():
         raise ValueError("Command cannot be empty")
 
