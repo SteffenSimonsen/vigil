@@ -152,6 +152,31 @@ class TestUpCLI:
             result = runner.invoke(main, ["up", "--json"])
             assert result.exit_code != 0
 
+    def test_up_no_vigilfile_json_outputs_json_error(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            result = runner.invoke(main, ["up", "--json"])
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert data["code"] == 1
+
+    def test_up_invalid_toml_json_outputs_json_error(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            Path("Vigilfile").write_text("not toml [[[[")
+            result = runner.invoke(main, ["up", "--json"])
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert data["code"] == 1
+
+    def test_up_no_vigilfile_plain_text_shows_human_error(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            result = runner.invoke(main, ["up"])
+            assert result.exit_code != 0
+
     def test_up_partial_failure_still_exits_zero(self, runner: CliRunner) -> None:
         """Best-effort: partial failures don't make the command exit non-zero."""
         with runner.isolated_filesystem():
@@ -241,4 +266,29 @@ class TestDownCLI:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()
             result = runner.invoke(main, ["down", "--json"])
+            assert result.exit_code != 0
+
+    def test_down_no_vigilfile_json_outputs_json_error(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            result = runner.invoke(main, ["down", "--json"])
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert data["code"] == 1
+
+    def test_down_invalid_toml_json_outputs_json_error(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            Path("Vigilfile").write_text("not toml [[[[")
+            result = runner.invoke(main, ["down", "--json"])
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert data["code"] == 1
+
+    def test_down_no_vigilfile_plain_text_shows_human_error(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            result = runner.invoke(main, ["down"])
             assert result.exit_code != 0

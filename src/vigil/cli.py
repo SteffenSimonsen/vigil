@@ -614,6 +614,8 @@ def cmd_up(only_names: str | None, force: bool, as_json: bool) -> None:
     try:
         entries = vigilfile_load(root)
     except VigilfileParseError as e:
+        if as_json:
+            _json_error(str(e))
         click.echo(str(e), err=True)
         sys.exit(1)
 
@@ -652,6 +654,8 @@ def cmd_down(only_names: str | None, as_json: bool) -> None:
     try:
         entries = vigilfile_load(root)
     except VigilfileParseError as e:
+        if as_json:
+            _json_error(str(e))
         click.echo(str(e), err=True)
         sys.exit(1)
 
