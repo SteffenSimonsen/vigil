@@ -708,8 +708,12 @@ def cmd_up(only_names: str | None, force: bool, as_json: bool) -> None:
         click.echo(str(e), err=True)
         sys.exit(1)
 
+    any_failed = any(r["status"] == "failed" for r in results)
+
     if as_json:
         click.echo(json.dumps({"processes": results}, indent=2))
+        if any_failed:
+            sys.exit(1)
         return
 
     for r in results:
@@ -721,6 +725,9 @@ def cmd_up(only_names: str | None, force: bool, as_json: bool) -> None:
             click.echo(f"  {name}: already running, skipped")
         else:
             click.echo(f"  {name}: failed — {r['error']}")
+
+    if any_failed:
+        sys.exit(1)
 
 
 @main.command("down")

@@ -177,8 +177,8 @@ class TestUpCLI:
             result = runner.invoke(main, ["up"])
             assert result.exit_code != 0
 
-    def test_up_partial_failure_still_exits_zero(self, runner: CliRunner) -> None:
-        """Best-effort: partial failures don't make the command exit non-zero."""
+    def test_up_any_failure_exits_one(self, runner: CliRunner) -> None:
+        """Any process failure causes exit 1."""
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()
             _write_vigilfile(Path("."), _two_process_vigilfile())
@@ -200,11 +200,35 @@ class TestUpCLI:
             ):
                 result = runner.invoke(main, ["up", "--json"], catch_exceptions=False)
 
-            assert result.exit_code == 0
+            assert result.exit_code == 1
             data = json.loads(result.output)
             statuses = {p["name"]: p["status"] for p in data["processes"]}
             assert statuses["db"] == "failed"
             assert statuses["api"] == "started"
+
+    def test_up_all_failures_exits_one(self, runner: CliRunner) -> None:
+        """All processes failing causes exit 1."""
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            _write_vigilfile(Path("."), _two_process_vigilfile())
+
+            def fake_start(cfg: object, name: str, command: str, **kwargs: object) -> MagicMock:
+                raise RuntimeError(f"{name} failed")
+
+            def fake_wait(cfg: object, name: str, **kwargs: object) -> None:
+                pass
+
+            with (
+                patch("vigil.vigilfile._start", side_effect=fake_start),
+                patch("vigil.vigilfile._wait", side_effect=fake_wait),
+            ):
+                result = runner.invoke(main, ["up", "--json"], catch_exceptions=False)
+
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            statuses = {p["name"]: p["status"] for p in data["processes"]}
+            assert statuses["db"] == "failed"
+            assert statuses["api"] == "failed"
 
 
 class TestDownCLI:
