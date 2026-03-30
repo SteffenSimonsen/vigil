@@ -1,11 +1,13 @@
-"""Statefile read/write (atomic)."""
+"""Statefile read/write (atomic, with file-lock for concurrent safety)."""
 
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import json
 import os
 import tempfile
+from collections.abc import Generator
 from dataclasses import dataclass
 from typing import Any
 
@@ -75,6 +77,18 @@ class StateManager:
     def __init__(self, config: Config) -> None:
         self.config = config
 
+    @contextlib.contextmanager
+    def _exclusive_lock(self) -> Generator[None, None, None]:
+        """Acquire an exclusive file lock for the duration of a read-modify-write."""
+        lock_path = self.config.state_file.parent / "state.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "w") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
+
     def _load_raw(self) -> dict[str, Any]:
         if not self.config.state_file.exists():
             return {}
@@ -118,21 +132,24 @@ class StateManager:
 
     def write(self, record: ProcessRecord) -> None:
         """Write or overwrite a record by name."""
-        raw = self._load_raw()
-        raw[record.name] = record.to_dict()
-        self._save_raw(raw)
+        with self._exclusive_lock():
+            raw = self._load_raw()
+            raw[record.name] = record.to_dict()
+            self._save_raw(raw)
 
     def delete(self, name: str) -> None:
         """Remove a record by name. No-op if not found."""
-        raw = self._load_raw()
-        if name in raw:
-            del raw[name]
-            self._save_raw(raw)
+        with self._exclusive_lock():
+            raw = self._load_raw()
+            if name in raw:
+                del raw[name]
+                self._save_raw(raw)
 
     def update(self, name: str, **fields: int | str | float | None) -> None:
         """Update specific fields of an existing record."""
-        raw = self._load_raw()
-        if name not in raw:
-            raise KeyError(f"No process named {name!r}")
-        raw[name].update(fields)
-        self._save_raw(raw)
+        with self._exclusive_lock():
+            raw = self._load_raw()
+            if name not in raw:
+                raise KeyError(f"No process named {name!r}")
+            raw[name].update(fields)
+            self._save_raw(raw)

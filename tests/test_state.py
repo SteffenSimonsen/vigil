@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -167,3 +168,29 @@ class TestPIDVerification:
             records = state.read_all()
 
         assert records[0].alive is False
+
+
+class TestConcurrentModification:
+    def test_concurrent_deletes_leave_no_stale_entries(self, state: StateManager) -> None:
+        """Concurrent deletes on different names must not overwrite each other."""
+        n = 10
+        for i in range(n):
+            state.write(make_record(name=f"proc-{i}", pid=1000 + i))
+
+        errors: list[Exception] = []
+
+        def delete_one(name: str) -> None:
+            try:
+                state.delete(name)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=delete_one, args=(f"proc-{i}",)) for i in range(n)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == [], f"Threads raised errors: {errors}"
+        records = state.read_all()
+        assert records == [], f"Expected empty state, got {[r.name for r in records]}"
