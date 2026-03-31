@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import time
 from collections import namedtuple
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
@@ -272,3 +274,61 @@ class TestVigilNext:
         runner = CliRunner()
         result = runner.invoke(main, ["next", "99999"])
         assert result.exit_code == 1
+
+
+def _write_state(vigil_dir: Path, records: dict[str, object]) -> None:
+    (vigil_dir / "state.json").write_text(json.dumps(records))
+
+
+class TestVigilScanManagedPorts:
+    def test_scan_default_includes_managed_process_outside_dev_range(self) -> None:
+        """vigil scan (default) includes a managed process port outside the dev range."""
+        start_time = time.time() - 10
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            _write_state(
+                Path(".vigil"),
+                {
+                    "scan-svc": {
+                        "name": "scan-svc",
+                        "pid": 9001,
+                        "command": "python3 -m http.server 18766",
+                        "started_at": start_time,
+                        "port": 18766,
+                        "cwd": None,
+                    }
+                },
+            )
+            mock_proc = MagicMock()
+            mock_proc.create_time.return_value = start_time + 0.1
+            mock_proc.name.return_value = "python3"
+            conn = _make_conn(9001, 18766)
+            with (
+                patch("psutil.net_connections", return_value=[conn]),
+                patch("psutil.Process", return_value=mock_proc),
+                patch("psutil.pid_exists", return_value=True),
+            ):
+                result = runner.invoke(main, ["scan", "--json"], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        ports = [entry["port"] for entry in data["listeners"]]
+        assert 18766 in ports
+
+    def test_scan_default_excludes_unmanaged_process_outside_dev_range(self) -> None:
+        """vigil scan (default) does not include unmanaged ports outside dev range."""
+        runner = CliRunner()
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            # No managed processes in state
+            conn = _make_conn(5555, 18766)
+            with (
+                patch("psutil.net_connections", return_value=[conn]),
+                patch("psutil.Process") as mock_proc_cls,
+            ):
+                mock_proc_cls.return_value.name.return_value = "some-proc"
+                result = runner.invoke(main, ["scan", "--json"], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        ports = [entry["port"] for entry in data["listeners"]]
+        assert 18766 not in ports

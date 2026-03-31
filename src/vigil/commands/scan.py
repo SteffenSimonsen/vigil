@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
+from pathlib import Path
 
 import click
 
 from vigil.commands._shared import json_error
+from vigil.config import Config, ConfigError, find_vigil_root
 from vigil.docker import enrich as docker_enrich
-from vigil.scanner import scan_all, scan_ports
+from vigil.scanner import ports_for_pid, scan_all, scan_ports
+from vigil.state import StateManager
 
 _DEFAULT_DEV_PORTS: list[int] = [
     *range(3000, 4000),
@@ -54,7 +58,18 @@ def cmd_scan(
             sys.exit(1)
         listeners = scan_ports(ports)
     else:
-        listeners = scan_ports(_DEFAULT_DEV_PORTS)
+        managed_ports: list[int] = []
+        with contextlib.suppress(ConfigError, Exception):
+            root = find_vigil_root(Path.cwd())
+            config = Config(root=root)
+            records = StateManager(config).read_all()
+            dev_port_set = set(_DEFAULT_DEV_PORTS)
+            for record in records:
+                if record.alive:
+                    for port in ports_for_pid(record.pid):
+                        if port not in dev_port_set:
+                            managed_ports.append(port)
+        listeners = scan_ports(_DEFAULT_DEV_PORTS + managed_ports)
 
     docker_enrich(listeners)
 
