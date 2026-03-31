@@ -11,7 +11,8 @@ import pytest
 from click.shell_completion import ShellComplete
 from click.testing import CliRunner
 
-from vigil.cli import _complete_process_names, main
+from vigil.cli import main
+from vigil.commands._shared import complete_process_names as _complete_process_names
 
 
 def _write_state(processes: list[dict[str, Any]]) -> None:
