@@ -6,7 +6,6 @@ from __future__ import annotations
 import contextlib
 import shlex
 import subprocess
-import time
 from pathlib import Path
 
 import psutil
@@ -101,8 +100,7 @@ def start(
     finally:
         log_file.close()
 
-    started_at = time.time()
-    # Prefer the actual process create_time from psutil for accuracy
+    started_at: float | None = None
     with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
         started_at = psutil.Process(proc.pid).create_time()
 

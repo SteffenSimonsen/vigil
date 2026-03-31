@@ -22,7 +22,7 @@ class StateCorruptedError(Exception):
 
 # How many seconds of tolerance to allow between recorded started_at and
 # the process's actual create_time (clocks differ slightly between APIs).
-_START_TIME_TOLERANCE = 2.0
+_START_TIME_TOLERANCE = 30.0
 
 
 @dataclass
@@ -32,7 +32,7 @@ class ProcessRecord:
     name: str
     pid: int
     command: str
-    started_at: float
+    started_at: float | None
     port: int | None = None
     cwd: str | None = None
     alive: bool = False  # populated on read, not persisted
@@ -53,16 +53,22 @@ class ProcessRecord:
             name=data["name"],
             pid=data["pid"],
             command=data["command"],
-            started_at=data["started_at"],
+            started_at=data.get("started_at"),
             port=data.get("port"),
             cwd=data.get("cwd"),
         )
 
 
-def _is_pid_alive(pid: int, started_at: float) -> bool:
-    """Return True if the PID is running and its start time matches."""
+def _is_pid_alive(pid: int, started_at: float | None) -> bool:
+    """Return True if the PID is running and its start time matches.
+
+    When *started_at* is None the check falls back to PID existence only —
+    used when psutil create_time was unavailable at spawn time.
+    """
     if not psutil.pid_exists(pid):
         return False
+    if started_at is None:
+        return True
     try:
         proc = psutil.Process(pid)
         create_time = proc.create_time()

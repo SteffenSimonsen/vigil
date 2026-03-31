@@ -47,7 +47,7 @@ class TestStart:
             assert r.name == "web"
             assert r.pid == record.pid
             assert r.command == "python -c 'import time; time.sleep(30)'"
-            assert r.started_at > 0
+            assert r.started_at is not None and r.started_at > 0
             assert r.cwd is not None
         finally:
             psutil.Process(record.pid).kill()
@@ -118,6 +118,27 @@ class TestStart:
             psutil.Process(record.pid).wait(timeout=5)
         log_path = config.logs_dir / "web.log"
         assert str(subdir).encode() in log_path.read_bytes()
+
+    def test_start_stores_none_started_at_when_psutil_create_time_unavailable(
+        self, config: Config
+    ) -> None:
+        """When psutil cannot get create_time (race condition), started_at must be None,
+        not wall-clock time — so liveness falls back to PID-only check."""
+        from unittest.mock import MagicMock, patch
+
+        mock_popen = MagicMock()
+        mock_popen.pid = 99999
+
+        mock_psutil_proc = MagicMock()
+        mock_psutil_proc.create_time.side_effect = psutil.NoSuchProcess(pid=99999)
+
+        with (
+            patch("subprocess.Popen", return_value=mock_popen),
+            patch("psutil.Process", return_value=mock_psutil_proc),
+        ):
+            record = start(config, "web", "python -c 'pass'")
+
+        assert record.started_at is None
 
     def test_stdout_stderr_captured_to_log_file(self, config: Config) -> None:
         record = start(config, "web", "python -c 'print(\"hello vigil\")'")

@@ -126,7 +126,45 @@ class TestAtomicWrite:
         assert state.config.state_file.read_text() == original_content
 
 
+class TestProcessRecordNullStartedAt:
+    def test_round_trip_with_none_started_at(self, state: StateManager) -> None:
+        """started_at=None survives a write/read round trip."""
+        record = ProcessRecord(name="web", pid=1234, command="cmd", started_at=None)
+        state.write(record)
+
+        with patch("psutil.pid_exists", return_value=False):
+            records = state.read_all()
+
+        assert records[0].started_at is None
+
+    def test_from_dict_with_missing_started_at(self) -> None:
+        """Old state files without started_at deserialise to started_at=None."""
+        data = {"name": "web", "pid": 1234, "command": "cmd"}
+        record = ProcessRecord.from_dict(data)
+        assert record.started_at is None
+
+
 class TestPIDVerification:
+    def test_alive_pid_with_none_started_at_is_alive(self, state: StateManager) -> None:
+        """When started_at is None, liveness falls back to PID existence only."""
+        record = ProcessRecord(name="web", pid=1234, command="cmd", started_at=None)
+        state.write(record)
+
+        with patch("psutil.pid_exists", return_value=True):
+            records = state.read_all()
+
+        assert records[0].alive is True
+
+    def test_dead_pid_with_none_started_at_is_not_alive(self, state: StateManager) -> None:
+        """When started_at is None and PID is gone, process is not alive."""
+        record = ProcessRecord(name="web", pid=9999, command="cmd", started_at=None)
+        state.write(record)
+
+        with patch("psutil.pid_exists", return_value=False):
+            records = state.read_all()
+
+        assert records[0].alive is False
+
     def test_alive_pid_with_matching_start_time_is_alive(self, state: StateManager) -> None:
         start_time = time.time() - 10
         record = make_record(pid=1234, started_at=start_time)
@@ -151,6 +189,24 @@ class TestPIDVerification:
             records = state.read_all()
 
         assert records[0].alive is False
+
+    def test_alive_pid_with_wsl2_clock_skew_is_still_alive(self, state: StateManager) -> None:
+        """A 15-second gap between wall-clock started_at and psutil create_time (WSL2)
+        must not cause a running process to appear dead."""
+        start_time = time.time()
+        record = make_record(pid=1234, started_at=start_time)
+        state.write(record)
+
+        mock_proc = MagicMock()
+        mock_proc.create_time.return_value = start_time - 15.0  # 15-second WSL2-style gap
+
+        with (
+            patch("psutil.pid_exists", return_value=True),
+            patch("psutil.Process", return_value=mock_proc),
+        ):
+            records = state.read_all()
+
+        assert records[0].alive is True
 
     def test_alive_pid_with_mismatched_start_time_is_dead(self, state: StateManager) -> None:
         start_time = time.time() - 100
