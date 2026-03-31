@@ -79,11 +79,13 @@ def _json_error(message: str, code: int = 1) -> None:
     sys.exit(code)
 
 
-def _require_project() -> Path:
+def _require_project(as_json: bool = False) -> Path:
     """Return project root or exit with a clear error message."""
     try:
         return find_vigil_root(Path.cwd())
     except ConfigError as e:
+        if as_json:
+            _json_error(str(e))
         click.echo(str(e))
         sys.exit(1)
 
@@ -157,7 +159,7 @@ def cmd_start(
     as_json: bool,
 ) -> None:
     """Start a named process."""
-    root = _require_project()
+    root = _require_project(as_json)
     config = Config(root=root)
 
     env: dict[str, str] | None = None
@@ -202,7 +204,7 @@ def cmd_start(
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool) -> None:
     """Stop a managed process (or all processes with --all)."""
-    root = _require_project()
+    root = _require_project(as_json)
     config = Config(root=root)
 
     if stop_all_flag:
@@ -259,7 +261,7 @@ def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 def cmd_restart(name: str, as_json: bool) -> None:
     """Stop and restart a managed process using its recorded command."""
-    root = _require_project()
+    root = _require_project(as_json)
     config = Config(root=root)
 
     try:
@@ -292,7 +294,7 @@ def cmd_restart(name: str, as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 def cmd_remove(name: str, force: bool, as_json: bool) -> None:
     """Remove a process entry from the registry."""
-    root = _require_project()
+    root = _require_project(as_json)
     config = Config(root=root)
 
     try:
@@ -326,7 +328,7 @@ def cmd_remove(name: str, force: bool, as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 def cmd_logs(name: str, tail: int, follow: bool, as_json: bool) -> None:
     """Show log output for a managed process."""
-    root = _require_project()
+    root = _require_project(as_json)
     config = Config(root=root)
 
     if follow:
@@ -402,7 +404,7 @@ def cmd_wait(
             click.echo("Error: Endpoint must start with /")
         sys.exit(1)
 
-    root = _require_project()
+    root = _require_project(as_json)
     config = Config(root=root)
 
     try:
@@ -441,7 +443,7 @@ def cmd_wait(
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 def cmd_status(as_json: bool) -> None:
     """Show status of all managed processes."""
-    root = _require_project()
+    root = _require_project(as_json)
     config = Config(root=root)
     try:
         records = StateManager(config).read_all()
@@ -565,7 +567,7 @@ def cmd_health(endpoint: str, timeout_sec: float | None, as_json: bool) -> None:
             click.echo("Error: Endpoint must start with /")
         sys.exit(1)
 
-    root = _require_project()
+    root = _require_project(as_json)
     config = Config(root=root)
 
     try:
@@ -597,7 +599,7 @@ def cmd_health(endpoint: str, timeout_sec: float | None, as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 def cmd_free(port: int, as_json: bool) -> None:
     """Free a port regardless of what is using it (managed, Docker, or unmanaged)."""
-    root = _require_project()
+    root = _require_project(as_json)
     config = Config(root=root)
 
     try:
@@ -623,7 +625,7 @@ def cmd_free(port: int, as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Output JSON without opening a browser.")
 def cmd_open(target: str, as_json: bool) -> None:
     """Open a service or port in the browser."""
-    root = _require_project()
+    root = _require_project(as_json)
     config = Config(root=root)
 
     try:
@@ -695,7 +697,7 @@ def cmd_next(start: int, count: int, as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 def cmd_up(only_names: str | None, force: bool, as_json: bool) -> None:
     """Start all Vigilfile processes in order."""
-    root = _require_project()
+    root = _require_project(as_json)
     config = Config(root=root)
 
     try:
@@ -748,7 +750,7 @@ def cmd_up(only_names: str | None, force: bool, as_json: bool) -> None:
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 def cmd_down(only_names: str | None, as_json: bool) -> None:
     """Stop all Vigilfile processes in reverse order."""
-    root = _require_project()
+    root = _require_project(as_json)
     config = Config(root=root)
 
     try:

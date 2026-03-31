@@ -97,3 +97,76 @@ class TestJsonErrorsOpen:
             data = json.loads(result.output)
             assert "error" in data
             assert data["code"] == 1
+
+
+class TestJsonErrorsMissingProject:
+    """--json flag must produce JSON output even when no .vigil/ directory exists."""
+
+    def _assert_json_error(self, result: object) -> None:
+        import click.testing
+
+        assert isinstance(result, click.testing.Result)
+        assert result.exit_code != 0
+        data = json.loads(result.output)
+        assert "error" in data
+        assert data["code"] == 1
+
+    def test_status_json_missing_project(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            result = runner.invoke(main, ["status", "--json"])
+            self._assert_json_error(result)
+
+    def test_start_json_missing_project(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            result = runner.invoke(main, ["start", "web", "echo hi", "--json"])
+            self._assert_json_error(result)
+
+    def test_stop_json_missing_project(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            result = runner.invoke(main, ["stop", "web", "--json"])
+            self._assert_json_error(result)
+
+    def test_logs_json_missing_project(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            result = runner.invoke(main, ["logs", "web", "--json"])
+            self._assert_json_error(result)
+
+    def test_restart_json_missing_project(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            result = runner.invoke(main, ["restart", "web", "--json"])
+            self._assert_json_error(result)
+
+    def test_remove_json_missing_project(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            result = runner.invoke(main, ["remove", "web", "--json"])
+            self._assert_json_error(result)
+
+    def test_wait_json_missing_project(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            result = runner.invoke(main, ["wait", "web", "--json"])
+            self._assert_json_error(result)
+
+    def test_health_json_missing_project(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            result = runner.invoke(main, ["health", "--json"])
+            self._assert_json_error(result)
+
+    def test_free_json_missing_project(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            result = runner.invoke(main, ["free", "3000", "--json"])
+            self._assert_json_error(result)
+
+    def test_open_json_missing_project(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            result = runner.invoke(main, ["open", "web", "--json"])
+            self._assert_json_error(result)
+
+    def test_up_json_missing_project(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            result = runner.invoke(main, ["up", "--json"])
+            self._assert_json_error(result)
+
+    def test_down_json_missing_project(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            result = runner.invoke(main, ["down", "--json"])
+            self._assert_json_error(result)
