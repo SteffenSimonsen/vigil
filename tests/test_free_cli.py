@@ -141,6 +141,23 @@ class TestFreeDockerContainer:
         assert any("myapp-postgres-1" in str(c) for c in stop_calls)
 
 
+class TestFreeTimeWaitPort:
+    def test_free_time_wait_port_returns_was_time_wait(self, runner: CliRunner) -> None:
+        """vigil free on a TIME_WAIT port returns was=time_wait, freed=false."""
+        conn = _make_conn(0, 3000, status="TIME_WAIT")
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            with patch("psutil.net_connections", return_value=[conn]):
+                result = runner.invoke(main, ["free", "3000", "--json"], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["port"] == 3000
+        assert data["freed"] is False
+        assert data["was"] == "time_wait"
+        assert "retry_after_seconds" in data
+        assert isinstance(data["retry_after_seconds"], int)
+
+
 class TestFreeAlreadyFreePort:
     def test_free_already_free_port_returns_was_free(self, runner: CliRunner) -> None:
         """vigil free on a port with nothing listening returns was=free."""
@@ -151,6 +168,17 @@ class TestFreeAlreadyFreePort:
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         assert data == {"port": 3000, "freed": True, "was": "free"}
+
+    def test_free_time_wait_port_human_output(self, runner: CliRunner) -> None:
+        """vigil free human output explains TIME_WAIT and suggests waiting or different port."""
+        conn = _make_conn(0, 3000, status="TIME_WAIT")
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            with patch("psutil.net_connections", return_value=[conn]):
+                result = runner.invoke(main, ["free", "3000"], catch_exceptions=False)
+        assert result.exit_code == 0, result.output
+        assert "3000" in result.output
+        assert "TIME_WAIT" in result.output
 
     def test_free_already_free_port_human_output(self, runner: CliRunner) -> None:
         """vigil free human output says port is already free."""

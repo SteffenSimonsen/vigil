@@ -52,7 +52,7 @@ def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool) -> None:
         sys.exit(1)
 
     try:
-        status = manager_stop(config, name)
+        result = manager_stop(config, name)
     except StateCorruptedError as e:
         if as_json:
             json_error(str(e))
@@ -65,9 +65,23 @@ def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool) -> None:
         sys.exit(1)
 
     if as_json:
-        click.echo(json.dumps({"name": name, "status": status}))
+        click.echo(
+            json.dumps(
+                {
+                    "name": name,
+                    "status": result["status"],
+                    "time_wait_ports": result["time_wait_ports"],
+                }
+            )
+        )
     else:
-        if status == "stopped":
+        if result["status"] == "stopped":
             click.echo(f"Stopped {name!r}")
         else:
             click.echo(f"Cleaned up {name!r} (was crashed)")
+        if result["time_wait_ports"]:
+            ports_str = ", ".join(str(p) for p in result["time_wait_ports"])
+            click.echo(
+                f"  Warning: port(s) {ports_str} entered TIME_WAIT — "
+                "they may be unavailable for ~60s."
+            )

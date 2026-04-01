@@ -35,5 +35,11 @@ def cmd_free(port: int, as_json: bool) -> None:
         was = result["was"]
         if was == "free":
             click.echo(f"Port {port} is already free.")
+        elif was == "time_wait":
+            retry = result.get("retry_after_seconds", 60)
+            click.echo(
+                f"Port {port} is in TIME_WAIT — the kernel is holding it after process death.\n"
+                f"It will become free in ~{retry}s. Pick another port or wait."
+            )
         else:
             click.echo(f"Freed port {port} ({was}).")

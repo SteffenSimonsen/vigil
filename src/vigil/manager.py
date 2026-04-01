@@ -7,12 +7,19 @@ import contextlib
 import shlex
 import subprocess
 from pathlib import Path
+from typing import Literal, TypedDict
 
 import psutil
 
 from vigil.config import Config
 from vigil.logs import open_log, trim_log
+from vigil.scanner import port_socket_state, ports_for_pid
 from vigil.state import ProcessRecord, StateManager
+
+
+class StopResult(TypedDict):
+    status: Literal["stopped", "cleaned_up"]
+    time_wait_ports: list[int]
 
 
 class ProcessAlreadyRunning(Exception):
@@ -115,7 +122,7 @@ def start(
     return record
 
 
-def stop(config: Config, name: str) -> str:
+def stop(config: Config, name: str) -> StopResult:
     """Stop a managed process by *name*.
 
     Sends SIGTERM, waits up to the configured grace period, then SIGKILL if
@@ -123,8 +130,9 @@ def stop(config: Config, name: str) -> str:
     Idempotent — succeeds silently if the process is already dead.
     Raises ProcessNotFound if *name* is not in the statefile.
 
-    Returns ``"stopped"`` if the process was alive when called, or
-    ``"cleaned_up"`` if it had already exited.
+    Returns a StopResult with:
+    - ``status``: ``"stopped"`` if the process was alive, ``"cleaned_up"`` if already exited.
+    - ``time_wait_ports``: ports that entered TIME_WAIT after the process was killed.
     """
     state = StateManager(config)
     existing = {r.name: r for r in state.read_all()}
@@ -134,13 +142,20 @@ def stop(config: Config, name: str) -> str:
 
     record = existing[name]
     was_alive = record.alive
+
+    held_ports: list[int] = []
     if was_alive:
+        held_ports = ports_for_pid(record.pid)
         _stop_process(record, grace=config.stop_grace_period)
 
     state.delete(name)
     trim_log(config, name, max_lines=config.log_retention_lines)
 
-    return "stopped" if was_alive else "cleaned_up"
+    tw_ports = [p for p in held_ports if port_socket_state(p) == "time_wait"]
+    return StopResult(
+        status="stopped" if was_alive else "cleaned_up",
+        time_wait_ports=tw_ports,
+    )
 
 
 def restart(config: Config, name: str) -> ProcessRecord:
@@ -186,18 +201,20 @@ def remove(config: Config, name: str, *, force: bool = False) -> None:
     state.delete(name)
 
 
-def stop_all(config: Config) -> list[dict[str, str]]:
+def stop_all(config: Config) -> list[dict[str, str | list[int]]]:
     """Stop all managed processes.
 
-    Returns a list of ``{"name": ..., "status": ...}`` dicts where *status* is
-    ``"stopped"`` if the process was alive, or ``"cleaned_up"`` if already dead.
+    Returns a list of dicts with ``name``, ``status``, and ``time_wait_ports``.
+    ``status`` is ``"stopped"`` if the process was alive, or ``"cleaned_up"`` if already dead.
     """
     state = StateManager(config)
     names = [r.name for r in state.read_all()]
-    results: list[dict[str, str]] = []
+    results: list[dict[str, str | list[int]]] = []
     for name in names:
-        status = stop(config, name)
-        results.append({"name": name, "status": status})
+        result = stop(config, name)
+        results.append(
+            {"name": name, "status": result["status"], "time_wait_ports": result["time_wait_ports"]}
+        )
     return results
 
 

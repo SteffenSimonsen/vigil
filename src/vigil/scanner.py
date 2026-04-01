@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING, TypedDict
+from typing import TYPE_CHECKING, Literal, TypedDict
 
 import psutil
 
@@ -35,6 +35,23 @@ def _snapshot() -> list[Listener]:
     return result
 
 
+def port_socket_state(port: int) -> Literal["listen", "time_wait", "free"]:
+    """Return the TCP socket state for *port*: 'listen', 'time_wait', or 'free'.
+
+    Reads the OS socket table once. TIME_WAIT means the kernel is holding the port
+    after process death; the port cannot be bound until the wait expires (~60s Linux,
+    up to 4 min macOS) unless the server sets SO_REUSEADDR.
+    """
+    for conn in psutil.net_connections(kind="inet"):
+        laddr_port = getattr(conn.laddr, "port", None)
+        if laddr_port == port:
+            if conn.status == "LISTEN":
+                return "listen"
+            if conn.status == "TIME_WAIT":
+                return "time_wait"
+    return "free"
+
+
 def scan_ports(ports: list[int]) -> list[Listener]:
     """Return listener info for each port in *ports* that is actively listening.
 
@@ -62,7 +79,12 @@ def next_free_port(start: int = 3000, count: int = 1) -> int | list[int]:
     """
     if start > 65535:
         raise ValueError(f"start port {start} is above the maximum valid port 65535")
-    occupied = {entry["port"] for entry in _snapshot()}
+    conns = psutil.net_connections(kind="inet")
+    occupied: set[int] = set()
+    for c in conns:
+        laddr_port = getattr(c.laddr, "port", None)
+        if isinstance(laddr_port, int) and c.status in ("LISTEN", "TIME_WAIT"):
+            occupied.add(laddr_port)
     found: list[int] = []
     port = start
     while len(found) < count:

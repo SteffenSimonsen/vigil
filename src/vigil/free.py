@@ -4,21 +4,22 @@ from __future__ import annotations
 
 import contextlib
 import subprocess
-from typing import Literal, TypedDict
+from typing import Literal, NotRequired, TypedDict
 
 import psutil
 
 from vigil.config import Config
 from vigil.docker import enrich as docker_enrich
 from vigil.manager import stop as manager_stop
-from vigil.scanner import scan_ports
+from vigil.scanner import port_socket_state, scan_ports
 from vigil.state import StateManager
 
 
 class FreeResult(TypedDict):
     port: int
     freed: bool
-    was: Literal["managed", "unmanaged", "docker", "free"]
+    was: Literal["managed", "unmanaged", "docker", "free", "time_wait"]
+    retry_after_seconds: NotRequired[int]
 
 
 def free_port(config: Config, port: int) -> FreeResult:
@@ -34,6 +35,8 @@ def free_port(config: Config, port: int) -> FreeResult:
     docker_enrich(listeners)
 
     if not listeners:
+        if port_socket_state(port) == "time_wait":
+            return FreeResult(port=port, freed=False, was="time_wait", retry_after_seconds=60)
         return FreeResult(port=port, freed=True, was="free")
 
     listener = listeners[0]

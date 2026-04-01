@@ -93,6 +93,34 @@ class TestStopCLI:
             assert data["name"] == "crashme"
             assert data["status"] == "cleaned_up"
 
+    def test_stop_warns_time_wait_ports_in_json(self, runner: CliRunner) -> None:
+        """vigil stop --json includes time_wait_ports when port enters TIME_WAIT after kill."""
+        from unittest.mock import patch
+
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            start_result = runner.invoke(
+                main,
+                ["start", "web", "python -c 'import time; time.sleep(30)'", "--json"],
+                catch_exceptions=False,
+            )
+            pid: int = json.loads(start_result.output)["pid"]
+            try:
+                # After stop, port 3000 enters TIME_WAIT
+                with (
+                    patch("vigil.manager.ports_for_pid", return_value=[3000]),
+                    patch("vigil.manager.port_socket_state", return_value="time_wait"),
+                ):
+                    result = runner.invoke(main, ["stop", "web", "--json"], catch_exceptions=False)
+                assert result.exit_code == 0, result.output
+                data = json.loads(result.output)
+                assert data["name"] == "web"
+                assert data["status"] == "stopped"
+                assert data["time_wait_ports"] == [3000]
+            finally:
+                with contextlib.suppress(Exception):
+                    psutil.Process(pid).kill()
+
     def test_stop_all_json_includes_cleaned_up_status(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()

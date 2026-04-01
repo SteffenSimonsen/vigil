@@ -106,14 +106,14 @@ class TestStop:
 
         result = stop(config, "web")
 
-        assert result == "cleaned_up"
+        assert result["status"] == "cleaned_up"
 
     def test_stop_returns_stopped_for_live_process(self, config: Config) -> None:
         start(config, "web", "python -c 'import time; time.sleep(30)'")
 
         result = stop(config, "web")
 
-        assert result == "stopped"
+        assert result["status"] == "stopped"
 
     def test_stop_kills_alive_process_and_removes_statefile_entry(self, config: Config) -> None:
         record = start(config, "web", "python -c 'import time; time.sleep(30)'")

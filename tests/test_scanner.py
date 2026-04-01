@@ -103,6 +103,35 @@ class TestScanAll:
         assert mock_net.call_count == 1
 
 
+class TestPortSocketState:
+    def test_returns_free_when_no_connections(self) -> None:
+        with patch("psutil.net_connections", return_value=[]):
+            from vigil.scanner import port_socket_state
+
+            assert port_socket_state(3000) == "free"
+
+    def test_returns_listen_for_listen_socket(self) -> None:
+        conn = _make_conn(1234, 3000, status="LISTEN")
+        with patch("psutil.net_connections", return_value=[conn]):
+            from vigil.scanner import port_socket_state
+
+            assert port_socket_state(3000) == "listen"
+
+    def test_returns_time_wait_for_time_wait_socket(self) -> None:
+        conn = _make_conn(0, 3000, status="TIME_WAIT")
+        with patch("psutil.net_connections", return_value=[conn]):
+            from vigil.scanner import port_socket_state
+
+            assert port_socket_state(3000) == "time_wait"
+
+    def test_returns_free_for_other_port(self) -> None:
+        conn = _make_conn(0, 4000, status="TIME_WAIT")
+        with patch("psutil.net_connections", return_value=[conn]):
+            from vigil.scanner import port_socket_state
+
+            assert port_socket_state(3000) == "free"
+
+
 class TestNextFreePort:
     def test_returns_start_when_free(self) -> None:
         with patch("psutil.net_connections", return_value=[]):
@@ -126,6 +155,13 @@ class TestNextFreePort:
         with patch("psutil.net_connections", mock_net):
             next_free_port(3000, count=3)
         assert mock_net.call_count == 1
+
+    def test_skips_time_wait_ports(self) -> None:
+        """next_free_port treats TIME_WAIT ports as unavailable."""
+        conns = [_make_conn(0, 3000, status="TIME_WAIT"), _make_conn(0, 3001, status="TIME_WAIT")]
+        with patch("psutil.net_connections", return_value=conns):
+            result = next_free_port(3000)
+        assert result == 3002
 
 
 class TestScanPorts:
