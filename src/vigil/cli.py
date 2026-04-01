@@ -11,6 +11,7 @@ from vigil.commands.init import cmd_init
 from vigil.commands.logs import cmd_logs
 from vigil.commands.next import cmd_next
 from vigil.commands.open import cmd_open
+from vigil.commands.orphans import cmd_orphans
 from vigil.commands.remove import cmd_remove
 from vigil.commands.restart import cmd_restart
 from vigil.commands.scan import cmd_scan
@@ -41,3 +42,4 @@ main.add_command(cmd_open)
 main.add_command(cmd_next)
 main.add_command(cmd_up)
 main.add_command(cmd_down)
+main.add_command(cmd_orphans)
