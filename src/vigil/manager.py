@@ -202,15 +202,28 @@ def stop_all(config: Config) -> list[dict[str, str]]:
 
 
 def _stop_process(record: ProcessRecord, grace: int = 5) -> None:
-    """Send SIGTERM then SIGKILL to *record*'s PID."""
+    """Send SIGTERM then SIGKILL to the entire process tree rooted at *record*'s PID.
+
+    Children are signalled before the parent so workers cannot be re-adopted.
+    Uses psutil.wait_procs() to handle races where children die mid-walk.
+    """
     try:
-        proc = psutil.Process(record.pid)
-        proc.terminate()
-        try:
-            proc.wait(timeout=grace)
-        except psutil.TimeoutExpired:
-            proc.kill()
-            with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
-                proc.wait(timeout=5)
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        pass
+        parent = psutil.Process(record.pid)
+        children = parent.children(recursive=True)
+        procs = children + [parent]
+    except psutil.NoSuchProcess:
+        return
+
+    # Graceful pass — children first, then parent
+    for p in procs:
+        with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+            p.terminate()
+
+    _, alive = psutil.wait_procs(procs, timeout=grace)
+
+    # Forceful pass on survivors
+    for p in alive:
+        with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+            p.kill()
+
+    psutil.wait_procs(alive, timeout=5)

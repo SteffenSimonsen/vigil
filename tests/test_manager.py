@@ -10,7 +10,7 @@ import psutil
 import pytest
 
 from vigil.config import Config
-from vigil.manager import ProcessAlreadyRunning, ProcessCrashed, start
+from vigil.manager import ProcessAlreadyRunning, ProcessCrashed, start, stop
 from vigil.state import StateManager
 
 
@@ -139,6 +139,35 @@ class TestStart:
             record = start(config, "web", "python -c 'pass'")
 
         assert record.started_at is None
+
+    def test_stop_kills_entire_process_tree(self, config: Config) -> None:
+        """Stopping a process must kill all descendant processes, not just the top-level PID."""
+        # Write a helper script to a temp file to avoid shell-quoting issues
+        script_path = config.root / "spawner.py"
+        script_path.write_text(
+            "import subprocess, time\n"
+            "subprocess.Popen(['python', '-c', 'import time; time.sleep(60)'])\n"
+            "time.sleep(60)\n"
+        )
+        record = start(config, "web", f"python {script_path}")
+        # Give parent time to spawn child
+        deadline = time.monotonic() + 5.0
+        children: list[psutil.Process] = []
+        while time.monotonic() < deadline:
+            with contextlib.suppress(psutil.NoSuchProcess):
+                children = psutil.Process(record.pid).children(recursive=True)
+            if children:
+                break
+            time.sleep(0.1)
+        assert children, "Expected at least one child process to have been spawned"
+        child_pids = [c.pid for c in children]
+
+        stop(config, "web")
+
+        time.sleep(0.3)
+        assert not psutil.pid_exists(record.pid), "Parent process should be dead after stop"
+        for child_pid in child_pids:
+            assert not psutil.pid_exists(child_pid), f"Child {child_pid} should be dead after stop"
 
     def test_stdout_stderr_captured_to_log_file(self, config: Config) -> None:
         record = start(config, "web", "python -c 'print(\"hello vigil\")'")
