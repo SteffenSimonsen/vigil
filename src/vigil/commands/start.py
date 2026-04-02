@@ -26,6 +26,7 @@ from vigil.state import StateCorruptedError
     help="Set environment variable in child process.",
 )
 @click.option("--cwd", default=None, help="Working directory for the child process.")
+@click.option("--env-file", "env_file", default=None, help="Load env vars from a .env file.")
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 def cmd_start(
     name: str,
@@ -33,6 +34,7 @@ def cmd_start(
     force: bool,
     env_vars: tuple[str, ...],
     cwd: str | None,
+    env_file: str | None,
     as_json: bool,
 ) -> None:
     """Start a named process."""
@@ -47,7 +49,9 @@ def cmd_start(
             env[key] = val
 
     try:
-        record = manager_start(config, name, command, force=force, env=env, cwd=cwd)
+        record = manager_start(
+            config, name, command, force=force, env=env, env_file=env_file, cwd=cwd
+        )
     except StateCorruptedError as e:
         if as_json:
             json_error(str(e))

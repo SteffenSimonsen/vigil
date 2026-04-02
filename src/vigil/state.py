@@ -8,7 +8,7 @@ import os
 import sys
 import tempfile
 from collections.abc import Generator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import psutil
@@ -39,6 +39,8 @@ class ProcessRecord:
     crash_count: int = 0
     last_crash_at: float | None = None
     circuit_open: bool = False
+    env_file: str | None = None
+    env_keys: list[str] = field(default_factory=lambda: [])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -51,6 +53,8 @@ class ProcessRecord:
             "crash_count": self.crash_count,
             "last_crash_at": self.last_crash_at,
             "circuit_open": self.circuit_open,
+            "env_file": self.env_file,
+            "env_keys": self.env_keys,
         }
 
     @classmethod
@@ -65,6 +69,8 @@ class ProcessRecord:
             crash_count=data.get("crash_count", 0),
             last_crash_at=data.get("last_crash_at"),
             circuit_open=bool(data.get("circuit_open", False)),
+            env_file=data.get("env_file"),
+            env_keys=data.get("env_keys", []),
         )
 
 

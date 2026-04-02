@@ -74,6 +74,8 @@ def cmd_status(as_json: bool) -> None:
                         "status": "alive",
                         "ports": entry_ports,
                         "docker": docker_lookup(entry_ports),
+                        "env_file": record.env_file,
+                        "env_overrides": {k: "[set]" for k in record.env_keys},
                     }
                 )
         else:
@@ -87,6 +89,8 @@ def cmd_status(as_json: bool) -> None:
                     "crashed": True,
                     "ports": [],
                     "docker": None,
+                    "env_file": record.env_file,
+                    "env_overrides": {k: "[set]" for k in record.env_keys},
                 }
             )
 
@@ -106,9 +110,10 @@ def cmd_status(as_json: bool) -> None:
             )
         elif entry["alive"]:
             ports_str = "  ".join(f":{p}" for p in entry["ports"])
+            env_str = f"  env:{entry['env_file']}" if entry.get("env_file") else ""
             click.echo(
                 f"  {entry['name']:<12} \u25cf alive    PID {entry['pid']}  {ports_str}"
-                f"  ({entry['command']})"
+                f"{env_str}  ({entry['command']})"
             )
         else:
             click.echo(f"  {entry['name']:<12} \u2716 crashed  ({entry['command']})")

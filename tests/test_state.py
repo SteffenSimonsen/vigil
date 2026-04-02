@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import sys
 import threading
 import time
+import types
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -124,6 +126,55 @@ class TestAtomicWrite:
             state.write(make_record(name="api", pid=200))
 
         assert state.config.state_file.read_text() == original_content
+
+
+class TestEnvTracking:
+    def test_env_file_and_env_keys_round_trip(self, state: StateManager) -> None:
+        """env_file and env_keys survive a write/read round trip."""
+        record = ProcessRecord(
+            name="web",
+            pid=1234,
+            command="cmd",
+            started_at=None,
+            env_file=".env.staging",
+            env_keys=["DATABASE_URL", "API_KEY"],
+        )
+        state.write(record)
+
+        with patch("psutil.pid_exists", return_value=False):
+            records = state.read_all()
+
+        assert records[0].env_file == ".env.staging"
+        assert records[0].env_keys == ["DATABASE_URL", "API_KEY"]
+
+    def test_env_fields_default_to_none_and_empty(self) -> None:
+        """env_file defaults to None, env_keys defaults to []."""
+        record = ProcessRecord(name="web", pid=1234, command="cmd", started_at=None)
+        assert record.env_file is None
+        assert record.env_keys == []
+
+    def test_old_state_without_env_fields_deserializes_to_defaults(self) -> None:
+        """State files without env_file/env_keys fields deserialise to defaults."""
+        data = {"name": "web", "pid": 1234, "command": "cmd"}
+        record = ProcessRecord.from_dict(data)
+        assert record.env_file is None
+        assert record.env_keys == []
+
+    def test_env_keys_stored_as_key_names_not_values(self, state: StateManager) -> None:
+        """Only key names are persisted, never values."""
+        record = ProcessRecord(
+            name="web",
+            pid=1234,
+            command="cmd",
+            started_at=None,
+            env_file=".env",
+            env_keys=["SECRET_KEY"],
+        )
+        state.write(record)
+        raw = state.config.state_file.read_text()
+        assert "SECRET_KEY" in raw
+        # No values should be stored — we only store key names
+        assert "[set]" not in raw
 
 
 class TestProcessRecordNullStartedAt:
@@ -250,3 +301,21 @@ class TestConcurrentModification:
         assert errors == [], f"Threads raised errors: {errors}"
         records = state.read_all()
         assert records == [], f"Expected empty state, got {[r.name for r in records]}"
+
+
+class TestWindowsLocking:
+    def test_exclusive_lock_uses_msvcrt_on_windows(self, state: StateManager) -> None:
+        """On Windows, _exclusive_lock must call msvcrt.locking instead of fcntl.flock."""
+        mock_locking = MagicMock()
+        mock_msvcrt = types.ModuleType("msvcrt")
+        mock_msvcrt.LK_NBLCK = 2  # type: ignore[attr-defined]
+        mock_msvcrt.LK_UNLCK = 0  # type: ignore[attr-defined]
+        mock_msvcrt.locking = mock_locking  # type: ignore[attr-defined]
+
+        with (
+            patch("sys.platform", "win32"),
+            patch.dict(sys.modules, {"msvcrt": mock_msvcrt}),
+        ):
+            state.write(make_record(name="win-test", pid=42))
+
+        assert mock_locking.called, "msvcrt.locking must be called on Windows"

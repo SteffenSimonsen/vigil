@@ -187,6 +187,109 @@ class TestStatusCLIText:
             assert result.exit_code == 0
             assert "No managed processes" in result.output
 
+    def test_alive_process_shows_env_file_when_set(self, runner: CliRunner) -> None:
+        start_time = time.time() - 10
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            _write_state(
+                Path(".vigil"),
+                {
+                    "web": {
+                        "name": "web",
+                        "pid": 1234,
+                        "command": "uvicorn main:app",
+                        "started_at": start_time,
+                        "port": 8000,
+                        "cwd": None,
+                        "env_file": ".env.staging",
+                        "env_keys": ["DATABASE_URL"],
+                    }
+                },
+            )
+            mock_proc = MagicMock()
+            mock_proc.create_time.return_value = start_time + 0.1
+
+            with (
+                patch("psutil.pid_exists", return_value=True),
+                patch("psutil.Process", return_value=mock_proc),
+                patch("psutil.net_connections", return_value=[]),
+            ):
+                result = runner.invoke(main, ["status"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        assert ".env.staging" in result.output
+
+
+class TestStatusEnvTracking:
+    def test_json_includes_env_file_and_env_keys_when_set(self, runner: CliRunner) -> None:
+        start_time = time.time() - 10
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            _write_state(
+                Path(".vigil"),
+                {
+                    "web": {
+                        "name": "web",
+                        "pid": 1234,
+                        "command": "uvicorn main:app",
+                        "started_at": start_time,
+                        "port": 8000,
+                        "cwd": None,
+                        "env_file": ".env.staging",
+                        "env_keys": ["DATABASE_URL", "API_KEY"],
+                    }
+                },
+            )
+            mock_proc = MagicMock()
+            mock_proc.create_time.return_value = start_time + 0.1
+
+            with (
+                patch("psutil.pid_exists", return_value=True),
+                patch("psutil.Process", return_value=mock_proc),
+                patch("psutil.net_connections", return_value=[]),
+            ):
+                result = runner.invoke(main, ["status", "--json"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        entry = data["managed"][0]
+        assert entry["env_file"] == ".env.staging"
+        assert set(entry["env_overrides"].keys()) == {"DATABASE_URL", "API_KEY"}
+        assert all(v == "[set]" for v in entry["env_overrides"].values())
+
+    def test_json_env_file_and_keys_null_when_not_set(self, runner: CliRunner) -> None:
+        start_time = time.time() - 10
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            _write_state(
+                Path(".vigil"),
+                {
+                    "web": {
+                        "name": "web",
+                        "pid": 1234,
+                        "command": "python -m http.server",
+                        "started_at": start_time,
+                        "port": 8000,
+                        "cwd": None,
+                    }
+                },
+            )
+            mock_proc = MagicMock()
+            mock_proc.create_time.return_value = start_time + 0.1
+
+            with (
+                patch("psutil.pid_exists", return_value=True),
+                patch("psutil.Process", return_value=mock_proc),
+                patch("psutil.net_connections", return_value=[]),
+            ):
+                result = runner.invoke(main, ["status", "--json"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        entry = data["managed"][0]
+        assert entry["env_file"] is None
+        assert entry["env_overrides"] == {}
+
 
 class TestStatusDockerEnrichment:
     def test_alive_container_process_includes_docker_in_json(self, runner: CliRunner) -> None:

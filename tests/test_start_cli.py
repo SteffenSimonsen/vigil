@@ -298,6 +298,65 @@ class TestStartCLI:
                     with contextlib.suppress(Exception):
                         psutil.Process(pid).kill()
 
+    def test_start_env_file_flag_loads_vars_into_child(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            Path(".env.test").write_text("MY_SECRET=hunter2\nOTHER_VAR=hello\n")
+            result = runner.invoke(
+                main,
+                [
+                    "start",
+                    "web",
+                    "python -c 'import os; print(os.environ[\"MY_SECRET\"])'",
+                    "--json",
+                    "--env-file",
+                    ".env.test",
+                ],
+                catch_exceptions=False,
+            )
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            pid: int = data["pid"]
+            with contextlib.suppress(psutil.NoSuchProcess, psutil.TimeoutExpired):
+                psutil.Process(pid).wait(timeout=5)
+            log_path = Path(".vigil") / "logs" / "web.log"
+            assert b"hunter2" in log_path.read_bytes()
+
+    def test_start_env_file_records_env_file_and_keys_in_state(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            Path(".env.staging").write_text(
+                "DATABASE_URL=postgres://localhost/db\nAPI_KEY=secret\n"
+            )
+            result = runner.invoke(
+                main,
+                [
+                    "start",
+                    "web",
+                    "python -c 'import time; time.sleep(30)'",
+                    "--json",
+                    "--env-file",
+                    ".env.staging",
+                ],
+                catch_exceptions=False,
+            )
+            pid: int | None = None
+            try:
+                assert result.exit_code == 0
+                data = json.loads(result.output)
+                pid = data["pid"]
+                state_raw = json.loads(Path(".vigil/state.json").read_text())
+                entry = state_raw["web"]
+                assert entry["env_file"] == ".env.staging"
+                assert set(entry["env_keys"]) == {"DATABASE_URL", "API_KEY"}
+                # Values must never appear in state.json
+                assert "postgres://localhost/db" not in Path(".vigil/state.json").read_text()
+                assert "secret" not in Path(".vigil/state.json").read_text()
+            finally:
+                if pid is not None:
+                    with contextlib.suppress(Exception):
+                        psutil.Process(pid).kill()
+
     def test_start_env_flag(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()

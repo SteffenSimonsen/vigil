@@ -6,6 +6,7 @@ from __future__ import annotations
 import contextlib
 import shlex
 import subprocess
+import sys
 from pathlib import Path
 from typing import Literal, TypedDict
 
@@ -41,6 +42,7 @@ def start(
     *,
     force: bool = False,
     env: dict[str, str] | None = None,
+    env_file: str | None = None,
     cwd: str | None = None,
 ) -> ProcessRecord:
     """Spawn *command* as a detached child process named *name*.
@@ -87,23 +89,50 @@ def start(
 
     effective_cwd = Path(cwd) if cwd else config.root
     log_file = open_log(config, name)
+
+    # Load env file vars and merge with explicit env overrides
+    file_vars: dict[str, str] = {}
+    if env_file:
+        from dotenv import dotenv_values
+
+        loaded = dotenv_values(env_file)
+        file_vars = {k: v for k, v in loaded.items() if v is not None}
+
+    merged_env: dict[str, str] = {**file_vars, **(env or {})}
+    # Record key names only — never values
+    recorded_env_keys = sorted(merged_env.keys())
+
     try:
         import os
 
         child_env: dict[str, str] | None = None
-        if env:
+        if merged_env:
             child_env = os.environ.copy()
-            child_env.update(env)
+            child_env.update(merged_env)
 
-        proc = subprocess.Popen(
-            shlex.split(command),
-            stdout=log_file,
-            stderr=log_file,
-            stdin=subprocess.DEVNULL,
-            cwd=str(effective_cwd),
-            start_new_session=True,
-            env=child_env,
-        )
+        if sys.platform == "win32":
+            # CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS — Windows equivalent of setsid()
+            _CREATE_NEW_PROCESS_GROUP = 0x00000200
+            _DETACHED_PROCESS = 0x00000008
+            proc = subprocess.Popen(
+                shlex.split(command),
+                stdout=log_file,
+                stderr=log_file,
+                stdin=subprocess.DEVNULL,
+                cwd=str(effective_cwd),
+                creationflags=_CREATE_NEW_PROCESS_GROUP | _DETACHED_PROCESS,
+                env=child_env,
+            )
+        else:
+            proc = subprocess.Popen(
+                shlex.split(command),
+                stdout=log_file,
+                stderr=log_file,
+                stdin=subprocess.DEVNULL,
+                cwd=str(effective_cwd),
+                start_new_session=True,
+                env=child_env,
+            )
     finally:
         log_file.close()
 
@@ -117,6 +146,8 @@ def start(
         command=command,
         started_at=started_at,
         cwd=str(effective_cwd),
+        env_file=env_file,
+        env_keys=recorded_env_keys,
     )
     state.write(record)
     return record
@@ -221,9 +252,17 @@ def stop_all(config: Config) -> list[dict[str, str | list[int]]]:
 def _stop_process(record: ProcessRecord, grace: int = 5) -> None:
     """Send SIGTERM then SIGKILL to the entire process tree rooted at *record*'s PID.
 
-    Children are signalled before the parent so workers cannot be re-adopted.
+    On Windows, delegates to ``taskkill /F /T`` which terminates the whole job tree.
+    On Unix, children are signalled before the parent so workers cannot be re-adopted.
     Uses psutil.wait_procs() to handle races where children die mid-walk.
     """
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(record.pid)],
+            check=False,
+        )
+        return
+
     try:
         parent = psutil.Process(record.pid)
         children = parent.children(recursive=True)
