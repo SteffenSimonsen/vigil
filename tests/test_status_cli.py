@@ -291,6 +291,140 @@ class TestStatusEnvTracking:
         assert entry["env_overrides"] == {}
 
 
+class TestStatusSessionId:
+    def test_json_includes_session_id_for_alive_process(self, runner: CliRunner) -> None:
+        start_time = time.time() - 10
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            _write_state(
+                Path(".vigil"),
+                {
+                    "web": {
+                        "name": "web",
+                        "pid": 1234,
+                        "command": "python -m http.server",
+                        "started_at": start_time,
+                        "port": 8000,
+                        "cwd": None,
+                        "session_id": "sess-abc",
+                    }
+                },
+            )
+            mock_proc = MagicMock()
+            mock_proc.create_time.return_value = start_time + 0.1
+
+            with (
+                patch("psutil.pid_exists", return_value=True),
+                patch("psutil.Process", return_value=mock_proc),
+                patch("psutil.net_connections", return_value=[]),
+            ):
+                result = runner.invoke(main, ["status", "--json"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        entry = data["managed"][0]
+        assert entry["session_id"] == "sess-abc"
+
+    def test_json_session_id_null_when_not_set(self, runner: CliRunner) -> None:
+        start_time = time.time() - 10
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            _write_state(
+                Path(".vigil"),
+                {
+                    "web": {
+                        "name": "web",
+                        "pid": 1234,
+                        "command": "python -m http.server",
+                        "started_at": start_time,
+                        "port": 8000,
+                        "cwd": None,
+                    }
+                },
+            )
+            mock_proc = MagicMock()
+            mock_proc.create_time.return_value = start_time + 0.1
+
+            with (
+                patch("psutil.pid_exists", return_value=True),
+                patch("psutil.Process", return_value=mock_proc),
+                patch("psutil.net_connections", return_value=[]),
+            ):
+                result = runner.invoke(main, ["status", "--json"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        entry = data["managed"][0]
+        assert entry["session_id"] is None
+
+
+class TestStatusSessionText:
+    def test_text_shows_session_id_abbreviated(self, runner: CliRunner) -> None:
+        start_time = time.time() - 10
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            _write_state(
+                Path(".vigil"),
+                {
+                    "web": {
+                        "name": "web",
+                        "pid": 1234,
+                        "command": "python -m http.server",
+                        "started_at": start_time,
+                        "port": 8000,
+                        "cwd": None,
+                        "session_id": "abcdef1234567890",
+                    }
+                },
+            )
+            mock_proc = MagicMock()
+            mock_proc.create_time.return_value = start_time + 0.1
+
+            with (
+                patch("psutil.pid_exists", return_value=True),
+                patch("psutil.Process", return_value=mock_proc),
+                patch("psutil.net_connections", return_value=[]),
+                patch.dict("os.environ", {}, clear=True),
+            ):
+                result = runner.invoke(main, ["status"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        # abbreviated session_id should appear
+        assert "abcdef12" in result.output
+
+    def test_text_marks_current_session(self, runner: CliRunner) -> None:
+        start_time = time.time() - 10
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            _write_state(
+                Path(".vigil"),
+                {
+                    "web": {
+                        "name": "web",
+                        "pid": 1234,
+                        "command": "python -m http.server",
+                        "started_at": start_time,
+                        "port": 8000,
+                        "cwd": None,
+                        "session_id": "my-session-id",
+                    }
+                },
+            )
+            mock_proc = MagicMock()
+            mock_proc.create_time.return_value = start_time + 0.1
+
+            with (
+                patch("psutil.pid_exists", return_value=True),
+                patch("psutil.Process", return_value=mock_proc),
+                patch("psutil.net_connections", return_value=[]),
+                patch.dict("os.environ", {"VIGIL_SESSION_ID": "my-session-id"}),
+            ):
+                result = runner.invoke(main, ["status"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        assert "this session" in result.output
+
+
 class TestStatusDockerEnrichment:
     def test_alive_container_process_includes_docker_in_json(self, runner: CliRunner) -> None:
         """vigil status --json includes docker object when process is a container."""

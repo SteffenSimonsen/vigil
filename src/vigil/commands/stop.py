@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 
 import click
@@ -12,14 +13,15 @@ from vigil.config import Config
 from vigil.manager import ProcessNotFound
 from vigil.manager import stop as manager_stop
 from vigil.manager import stop_all as manager_stop_all
-from vigil.state import StateCorruptedError
+from vigil.state import StateCorruptedError, StateManager
 
 
 @click.command("stop")
 @click.argument("name", required=False, default=None, shell_complete=complete_process_names)
 @click.option("--all", "stop_all_flag", is_flag=True, help="Stop all managed processes.")
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
-def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool) -> None:
+@click.option("--force", is_flag=True, help="Suppress cross-session ownership warning.")
+def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool, force: bool) -> None:
     """Stop a managed process (or all processes with --all)."""
     root = require_project(as_json)
     config = Config(root=root)
@@ -50,6 +52,22 @@ def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool) -> None:
             json_error("Provide a process name or use --all.")
         click.echo("Provide a process name or use --all.", err=True)
         sys.exit(1)
+
+    # Cross-session ownership warning
+    if not force and not as_json:
+        current_session = os.environ.get("VIGIL_SESSION_ID")
+        if current_session:
+            try:
+                records = {r.name: r for r in StateManager(config).read_all()}
+                record = records.get(name)
+                if record and record.session_id and record.session_id != current_session:
+                    click.echo(
+                        f"Warning: {name!r} was started by a different vigil session "
+                        f"({record.session_id[:8]}).\n"
+                        "Stopping anyway. Use --force to suppress this warning."
+                    )
+            except StateCorruptedError:
+                pass
 
     try:
         result = manager_stop(config, name)

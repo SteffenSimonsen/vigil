@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import psutil
 import pytest
@@ -120,6 +121,40 @@ class TestStopCLI:
             finally:
                 with contextlib.suppress(Exception):
                     psutil.Process(pid).kill()
+
+    def test_stop_warns_when_stopping_cross_session_process(self, runner: CliRunner) -> None:
+        """vigil stop warns (stderr) when stopping a process owned by a different session."""
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            # Start process with session-A
+            with patch.dict("os.environ", {"VIGIL_SESSION_ID": "session-a"}):
+                runner.invoke(
+                    main,
+                    ["start", "web", "python -c 'import time; time.sleep(30)'", "--json"],
+                    catch_exceptions=False,
+                )
+            # Stop from session-B — should warn
+            with patch.dict("os.environ", {"VIGIL_SESSION_ID": "session-b"}):
+                result = runner.invoke(main, ["stop", "web"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        assert "different vigil session" in result.output
+
+    def test_stop_force_suppresses_cross_session_warning(self, runner: CliRunner) -> None:
+        """vigil stop --force does not warn about cross-session ownership."""
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            with patch.dict("os.environ", {"VIGIL_SESSION_ID": "session-a"}):
+                runner.invoke(
+                    main,
+                    ["start", "web", "python -c 'import time; time.sleep(30)'", "--json"],
+                    catch_exceptions=False,
+                )
+            with patch.dict("os.environ", {"VIGIL_SESSION_ID": "session-b"}):
+                result = runner.invoke(main, ["stop", "web", "--force"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        assert "different vigil session" not in result.output
 
     def test_stop_all_json_includes_cleaned_up_status(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():

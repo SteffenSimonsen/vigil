@@ -172,6 +172,19 @@ class TestStart:
         for child_pid in child_pids:
             assert not psutil.pid_exists(child_pid), f"Child {child_pid} should be dead after stop"
 
+    def test_start_records_session_id_from_env(self, config: Config) -> None:
+        """start() stores VIGIL_SESSION_ID env var in the ProcessRecord."""
+        with patch.dict("os.environ", {"VIGIL_SESSION_ID": "test-session-xyz"}):
+            record = start(config, "web", "python -c 'import time; time.sleep(30)'")
+        try:
+            assert record.session_id == "test-session-xyz"
+            # Persisted in state too
+            records = StateManager(config).read_all()
+            assert records[0].session_id == "test-session-xyz"
+        finally:
+            with contextlib.suppress(psutil.NoSuchProcess):
+                psutil.Process(record.pid).kill()
+
     def test_stdout_stderr_captured_to_log_file(self, config: Config) -> None:
         record = start(config, "web", "python -c 'print(\"hello vigil\")'")
         # Give the process time to write output and exit

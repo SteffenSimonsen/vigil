@@ -41,6 +41,7 @@ class ProcessRecord:
     circuit_open: bool = False
     env_file: str | None = None
     env_keys: list[str] = field(default_factory=lambda: [])
+    session_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -55,6 +56,7 @@ class ProcessRecord:
             "circuit_open": self.circuit_open,
             "env_file": self.env_file,
             "env_keys": self.env_keys,
+            "session_id": self.session_id,
         }
 
     @classmethod
@@ -71,6 +73,7 @@ class ProcessRecord:
             circuit_open=bool(data.get("circuit_open", False)),
             env_file=data.get("env_file"),
             env_keys=data.get("env_keys", []),
+            session_id=data.get("session_id"),
         )
 
 

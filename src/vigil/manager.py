@@ -140,6 +140,8 @@ def start(
     with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
         started_at = psutil.Process(proc.pid).create_time()
 
+    import os
+
     record = ProcessRecord(
         name=name,
         pid=proc.pid,
@@ -148,6 +150,7 @@ def start(
         cwd=str(effective_cwd),
         env_file=env_file,
         env_keys=recorded_env_keys,
+        session_id=os.environ.get("VIGIL_SESSION_ID"),
     )
     state.write(record)
     return record

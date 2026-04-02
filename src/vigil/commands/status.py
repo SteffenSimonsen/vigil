@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from typing import Any
 
@@ -14,6 +15,16 @@ from vigil.crash_loop import observe as _observe_crash_loop
 from vigil.docker import lookup as docker_lookup
 from vigil.scanner import ports_for_pid
 from vigil.state import StateCorruptedError, StateManager
+
+
+def _format_session(session_id: str | None, current_session: str | None) -> str:
+    """Return an abbreviated session label for text output."""
+    if session_id is None:
+        return ""
+    short = session_id[:8]
+    if current_session and session_id == current_session:
+        return f"{short} (this session)"
+    return short
 
 
 @click.command("status")
@@ -76,6 +87,7 @@ def cmd_status(as_json: bool) -> None:
                         "docker": docker_lookup(entry_ports),
                         "env_file": record.env_file,
                         "env_overrides": {k: "[set]" for k in record.env_keys},
+                        "session_id": record.session_id,
                     }
                 )
         else:
@@ -91,6 +103,7 @@ def cmd_status(as_json: bool) -> None:
                     "docker": None,
                     "env_file": record.env_file,
                     "env_overrides": {k: "[set]" for k in record.env_keys},
+                    "session_id": record.session_id,
                 }
             )
 
@@ -102,18 +115,23 @@ def cmd_status(as_json: bool) -> None:
         click.echo("No managed processes.")
         return
 
+    current_session = os.environ.get("VIGIL_SESSION_ID")
     for entry in managed:
+        session_str = _format_session(entry.get("session_id"), current_session)
+        session_suffix = f"  [{session_str}]" if session_str else ""
         if entry["status"] == "crash_looping":
             click.echo(
                 f"  {entry['name']:<12} \u26a0 crash_looping  PID {entry['pid']}  "
-                f"(crashes={entry['crash_count']})  ({entry['command']})"
+                f"(crashes={entry['crash_count']})  ({entry['command']}){session_suffix}"
             )
         elif entry["alive"]:
             ports_str = "  ".join(f":{p}" for p in entry["ports"])
             env_str = f"  env:{entry['env_file']}" if entry.get("env_file") else ""
             click.echo(
                 f"  {entry['name']:<12} \u25cf alive    PID {entry['pid']}  {ports_str}"
-                f"{env_str}  ({entry['command']})"
+                f"{env_str}  ({entry['command']}){session_suffix}"
             )
         else:
-            click.echo(f"  {entry['name']:<12} \u2716 crashed  ({entry['command']})")
+            click.echo(
+                f"  {entry['name']:<12} \u2716 crashed  ({entry['command']}){session_suffix}"
+            )

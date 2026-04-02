@@ -303,6 +303,29 @@ class TestConcurrentModification:
         assert records == [], f"Expected empty state, got {[r.name for r in records]}"
 
 
+class TestSessionId:
+    def test_session_id_round_trips_through_state(self, state: StateManager) -> None:
+        """session_id survives a write/read round trip."""
+        record = ProcessRecord(
+            name="web", pid=1234, command="cmd", started_at=None, session_id="sess-abc"
+        )
+        state.write(record)
+
+        with patch("psutil.pid_exists", return_value=False):
+            records = state.read_all()
+
+        assert records[0].session_id == "sess-abc"
+
+    def test_session_id_defaults_to_none(self) -> None:
+        record = ProcessRecord(name="web", pid=1234, command="cmd", started_at=None)
+        assert record.session_id is None
+
+    def test_old_state_without_session_id_deserializes_to_none(self) -> None:
+        data = {"name": "web", "pid": 1234, "command": "cmd"}
+        record = ProcessRecord.from_dict(data)
+        assert record.session_id is None
+
+
 class TestWindowsLocking:
     def test_exclusive_lock_uses_msvcrt_on_windows(self, state: StateManager) -> None:
         """On Windows, _exclusive_lock must call msvcrt.locking instead of fcntl.flock."""
