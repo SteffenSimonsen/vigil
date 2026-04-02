@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import contextlib
+import sys
 import time
+import types
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import psutil
 import pytest
@@ -177,3 +180,77 @@ class TestStart:
         log_path = config.logs_dir / "web.log"
         assert log_path.exists()
         assert b"hello vigil" in log_path.read_bytes()
+
+
+class TestWindowsCompat:
+    # Windows-specific constants (not available on non-Windows, so hardcode)
+    _CREATE_NEW_PROCESS_GROUP = 0x00000200
+    _DETACHED_PROCESS = 0x00000008
+
+    def test_start_uses_windows_creationflags_on_windows(self, config: Config) -> None:
+        """On Windows, Popen must use CREATE_NEW_PROCESS_GROUP|DETACHED_PROCESS."""
+        mock_proc = MagicMock()
+        mock_proc.pid = 99999
+        mock_psutil = MagicMock()
+        mock_psutil.create_time.return_value = time.time()
+
+        mock_msvcrt = types.ModuleType("msvcrt")
+        mock_msvcrt.LK_NBLCK = 2  # type: ignore[attr-defined]
+        mock_msvcrt.LK_UNLCK = 0  # type: ignore[attr-defined]
+        mock_msvcrt.locking = MagicMock()  # type: ignore[attr-defined]
+
+        with (
+            patch("sys.platform", "win32"),
+            patch.dict(sys.modules, {"msvcrt": mock_msvcrt}),
+            patch("vigil.manager.subprocess.Popen", return_value=mock_proc) as mock_popen,
+            patch("vigil.manager.psutil.Process", return_value=mock_psutil),
+        ):
+            start(config, "web", "python -c 'pass'")
+
+        kwargs = mock_popen.call_args.kwargs
+        expected = self._CREATE_NEW_PROCESS_GROUP | self._DETACHED_PROCESS
+        assert kwargs.get("creationflags") == expected
+        assert "start_new_session" not in kwargs
+
+    def test_start_uses_start_new_session_on_unix(self, config: Config) -> None:
+        """On Unix, Popen must use start_new_session=True."""
+        mock_proc = MagicMock()
+        mock_proc.pid = 99999
+        mock_psutil = MagicMock()
+        mock_psutil.create_time.return_value = time.time()
+
+        with (
+            patch("sys.platform", "linux"),
+            patch("vigil.manager.subprocess.Popen", return_value=mock_proc) as mock_popen,
+            patch("vigil.manager.psutil.Process", return_value=mock_psutil),
+        ):
+            start(config, "web", "python -c 'pass'")
+
+        kwargs = mock_popen.call_args.kwargs
+        assert kwargs.get("start_new_session") is True
+        assert "creationflags" not in kwargs
+
+    def test_stop_uses_taskkill_on_windows(self, config: Config) -> None:
+        """On Windows, stop must use taskkill /F /T /PID for process tree kill."""
+        record = start(config, "web", "python -c 'import time; time.sleep(30)'")
+        pid = record.pid
+
+        mock_msvcrt = types.ModuleType("msvcrt")
+        mock_msvcrt.LK_NBLCK = 2  # type: ignore[attr-defined]
+        mock_msvcrt.LK_UNLCK = 0  # type: ignore[attr-defined]
+        mock_msvcrt.locking = MagicMock()  # type: ignore[attr-defined]
+
+        try:
+            with (
+                patch("sys.platform", "win32"),
+                patch.dict(sys.modules, {"msvcrt": mock_msvcrt}),
+                patch("vigil.manager.subprocess.run") as mock_run,
+            ):
+                stop(config, "web")
+            mock_run.assert_called_once_with(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                check=False,
+            )
+        finally:
+            with contextlib.suppress(psutil.NoSuchProcess):
+                psutil.Process(pid).kill()
