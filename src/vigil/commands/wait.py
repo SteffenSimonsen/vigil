@@ -9,6 +9,7 @@ import click
 
 from vigil.commands._shared import complete_process_names, json_error, require_project
 from vigil.config import Config
+from vigil.crash_loop import CrashLooping
 from vigil.state import StateCorruptedError
 from vigil.wait import ProcessDied, WaitTimeout, wait_for_ready
 from vigil.wait import ProcessNotFound as WaitProcessNotFound
@@ -65,6 +66,12 @@ def cmd_wait(
 
     try:
         wait_for_ready(config, name, timeout=timeout, port=port_override, http_path=http_path)
+    except CrashLooping as e:
+        if as_json:
+            click.echo(json.dumps({"name": name, "status": "crash_looping", "error": str(e)}))
+        else:
+            click.echo(str(e), err=True)
+        sys.exit(2)
     except StateCorruptedError as e:
         if as_json:
             json_error(str(e))

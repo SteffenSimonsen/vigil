@@ -10,6 +10,7 @@ from typing import TypedDict
 import httpx
 
 from vigil.config import Config
+from vigil.crash_loop import observe as _observe_crash_loop
 from vigil.scanner import ports_for_pid
 from vigil.state import StateManager
 
@@ -54,6 +55,24 @@ def check_health(
 
     results: list[HealthResult] = []
     for record in records:
+        # Update crash-loop state and check circuit
+        _observe_crash_loop(config, record.name)
+        # Re-read updated record
+        updated = {r.name: r for r in StateManager(config).read_all()}
+        if record.name in updated and updated[record.name].circuit_open:
+            count = updated[record.name].crash_count
+            results.append(
+                HealthResult(
+                    name=record.name,
+                    healthy=False,
+                    status="crash_looping",
+                    latency_ms=None,
+                    error=f"Process is crash-looping (crash_count={count}). "
+                    f"Use 'vigil logs {record.name}' to investigate.",
+                )
+            )
+            continue
+
         ports = ports_for_pid(record.pid)
         if not ports:
             results.append(

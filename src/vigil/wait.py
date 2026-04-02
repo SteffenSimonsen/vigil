@@ -8,8 +8,12 @@ import time
 import httpx
 
 from vigil.config import Config
+from vigil.crash_loop import CrashLooping
+from vigil.crash_loop import observe as _observe_crash_loop
 from vigil.scanner import ports_for_pid
 from vigil.state import StateManager
+
+__all__ = ["CrashLooping", "ProcessDied", "ProcessNotFound", "WaitTimeout", "wait_for_ready"]
 
 
 class WaitTimeout(Exception):
@@ -53,6 +57,16 @@ def wait_for_ready(
             raise ProcessNotFound(f"No managed process named {name!r}")
         if not records[name].alive:
             raise ProcessDied(f"Process {name!r} died while waiting for readiness.")
+
+        # Update crash-loop observation; fail fast if circuit is open
+        _observe_crash_loop(config, name)
+        updated = {r.name: r for r in state.read_all()}
+        if name in updated and updated[name].circuit_open:
+            count = updated[name].crash_count
+            raise CrashLooping(
+                f"Process {name!r} is crash-looping (crash_count={count}). "
+                f"Use 'vigil logs {name}' to investigate."
+            )
 
         pid = records[name].pid
 

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import json
 import os
+import sys
 import tempfile
 from collections.abc import Generator
 from dataclasses import dataclass
@@ -36,6 +36,9 @@ class ProcessRecord:
     port: int | None = None
     cwd: str | None = None
     alive: bool = False  # populated on read, not persisted
+    crash_count: int = 0
+    last_crash_at: float | None = None
+    circuit_open: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -45,6 +48,9 @@ class ProcessRecord:
             "started_at": self.started_at,
             "port": self.port,
             "cwd": self.cwd,
+            "crash_count": self.crash_count,
+            "last_crash_at": self.last_crash_at,
+            "circuit_open": self.circuit_open,
         }
 
     @classmethod
@@ -56,6 +62,9 @@ class ProcessRecord:
             started_at=data.get("started_at"),
             port=data.get("port"),
             cwd=data.get("cwd"),
+            crash_count=data.get("crash_count", 0),
+            last_crash_at=data.get("last_crash_at"),
+            circuit_open=bool(data.get("circuit_open", False)),
         )
 
 
@@ -85,15 +94,30 @@ class StateManager:
 
     @contextlib.contextmanager
     def _exclusive_lock(self) -> Generator[None, None, None]:
-        """Acquire an exclusive file lock for the duration of a read-modify-write."""
+        """Acquire an exclusive file lock for the duration of a read-modify-write.
+
+        Uses fcntl.flock on Unix and msvcrt.locking on Windows.
+        """
         lock_path = self.config.state_file.parent / "state.lock"
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(lock_path, "w") as lf:
-            fcntl.flock(lf, fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lf, fcntl.LOCK_UN)
+        if sys.platform == "win32":
+            import msvcrt
+
+            with open(lock_path, "w") as lf:
+                msvcrt.locking(lf.fileno(), msvcrt.LK_NBLCK, 1)
+                try:
+                    yield
+                finally:
+                    msvcrt.locking(lf.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            with open(lock_path, "w") as lf:
+                fcntl.flock(lf, fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(lf, fcntl.LOCK_UN)
 
     def _load_raw(self) -> dict[str, Any]:
         if not self.config.state_file.exists():
@@ -151,7 +175,7 @@ class StateManager:
                 del raw[name]
                 self._save_raw(raw)
 
-    def update(self, name: str, **fields: int | str | float | None) -> None:
+    def update(self, name: str, **fields: int | str | float | bool | None) -> None:
         """Update specific fields of an existing record."""
         with self._exclusive_lock():
             raw = self._load_raw()
