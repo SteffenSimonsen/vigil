@@ -42,6 +42,7 @@ class ProcessRecord:
     env_file: str | None = None
     env_keys: list[str] = field(default_factory=lambda: [])
     session_id: str | None = None
+    depends_on: list[str] = field(default_factory=lambda: [])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -57,6 +58,7 @@ class ProcessRecord:
             "env_file": self.env_file,
             "env_keys": self.env_keys,
             "session_id": self.session_id,
+            "depends_on": self.depends_on,
         }
 
     @classmethod
@@ -74,6 +76,7 @@ class ProcessRecord:
             env_file=data.get("env_file"),
             env_keys=data.get("env_keys", []),
             session_id=data.get("session_id"),
+            depends_on=data.get("depends_on", []),
         )
 
 
@@ -184,7 +187,7 @@ class StateManager:
                 del raw[name]
                 self._save_raw(raw)
 
-    def update(self, name: str, **fields: int | str | float | bool | None) -> None:
+    def update(self, name: str, **fields: int | str | float | bool | list[str] | None) -> None:
         """Update specific fields of an existing record."""
         with self._exclusive_lock():
             raw = self._load_raw()

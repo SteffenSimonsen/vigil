@@ -55,6 +55,8 @@ def cmd_status(as_json: bool) -> None:
         click.echo(str(e), err=True)
         sys.exit(1)
 
+    alive_names = {r.name for r in records if r.alive}
+
     managed: list[dict[str, Any]] = []
     for record in records:
         if record.alive:
@@ -76,18 +78,25 @@ def cmd_status(as_json: bool) -> None:
                 )
             else:
                 entry_ports = ports_for_pid(record.pid)
+                dead_deps = [d for d in record.depends_on if d not in alive_names]
+                status = "degraded" if dead_deps else "alive"
+                dep_status = {
+                    d: ("alive" if d in alive_names else "dead") for d in record.depends_on
+                }
                 managed.append(
                     {
                         "name": record.name,
                         "command": record.command,
                         "pid": record.pid,
                         "alive": True,
-                        "status": "alive",
+                        "status": status,
                         "ports": entry_ports,
                         "docker": docker_lookup(entry_ports),
                         "env_file": record.env_file,
                         "env_overrides": {k: "[set]" for k in record.env_keys},
                         "session_id": record.session_id,
+                        "depends_on": record.depends_on,
+                        "dependency_status": dep_status,
                     }
                 )
         else:

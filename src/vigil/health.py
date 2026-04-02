@@ -51,7 +51,9 @@ def check_health(
     """
     effective_timeout = timeout if timeout is not None else config.health_check_timeout
     state = StateManager(config)
-    records = [r for r in state.read_all() if r.alive]
+    all_records = state.read_all()
+    alive_names = {r.name for r in all_records if r.alive}
+    records = [r for r in all_records if r.alive]
 
     results: list[HealthResult] = []
     for record in records:
@@ -69,6 +71,20 @@ def check_health(
                     latency_ms=None,
                     error=f"Process is crash-looping (crash_count={count}). "
                     f"Use 'vigil logs {record.name}' to investigate.",
+                )
+            )
+            continue
+
+        # Degraded: alive but a dependency is down
+        dead_deps = [d for d in record.depends_on if d not in alive_names]
+        if dead_deps:
+            results.append(
+                HealthResult(
+                    name=record.name,
+                    healthy=False,
+                    status="degraded",
+                    latency_ms=None,
+                    error=f"dependency down: {', '.join(dead_deps)}",
                 )
             )
             continue

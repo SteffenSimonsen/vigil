@@ -499,3 +499,108 @@ class TestStatusDockerEnrichment:
         data = json.loads(result.output)
         entry = data["managed"][0]
         assert entry["docker"] is None
+
+
+# ---------------------------------------------------------------------------
+# Degraded status (alive but dependency is down)
+# ---------------------------------------------------------------------------
+
+
+class TestDegradedStatus:
+    def test_degraded_when_alive_but_dependency_crashed(self, runner: CliRunner) -> None:
+        """Process is alive but a dependency is dead → status is 'degraded'."""
+        start_time = time.time() - 10
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            _write_state(
+                Path(".vigil"),
+                {
+                    "database": {
+                        "name": "database",
+                        "pid": 9999,
+                        "command": "postgres",
+                        "started_at": start_time,
+                        "port": 5432,
+                        "cwd": None,
+                        "depends_on": [],
+                    },
+                    "backend": {
+                        "name": "backend",
+                        "pid": 1234,
+                        "command": "uvicorn main:app",
+                        "started_at": start_time,
+                        "port": 8000,
+                        "cwd": None,
+                        "depends_on": ["database"],
+                    },
+                },
+            )
+            mock_proc = MagicMock()
+            mock_proc.create_time.return_value = start_time + 0.1
+            conn = _make_conn(1234, 8000)
+
+            def pid_exists(pid: int) -> bool:
+                return pid == 1234  # only backend alive, database dead
+
+            with (
+                patch("psutil.pid_exists", side_effect=pid_exists),
+                patch("psutil.Process", return_value=mock_proc),
+                patch("psutil.net_connections", return_value=[conn]),
+            ):
+                result = runner.invoke(main, ["status", "--json"], catch_exceptions=False)
+
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            entries = {e["name"]: e for e in data["managed"]}
+            assert entries["backend"]["status"] == "degraded"
+            assert entries["database"]["status"] == "crashed"
+
+    def test_json_includes_depends_on_and_dependency_status(self, runner: CliRunner) -> None:
+        """JSON output for an alive process includes depends_on and dependency_status."""
+        start_time = time.time() - 10
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            _write_state(
+                Path(".vigil"),
+                {
+                    "database": {
+                        "name": "database",
+                        "pid": 9999,
+                        "command": "postgres",
+                        "started_at": start_time,
+                        "port": 5432,
+                        "cwd": None,
+                        "depends_on": [],
+                    },
+                    "backend": {
+                        "name": "backend",
+                        "pid": 1234,
+                        "command": "uvicorn main:app",
+                        "started_at": start_time,
+                        "port": 8000,
+                        "cwd": None,
+                        "depends_on": ["database"],
+                    },
+                },
+            )
+            mock_proc = MagicMock()
+            mock_proc.create_time.return_value = start_time + 0.1
+            conn = _make_conn(1234, 8000)
+
+            def pid_exists(pid: int) -> bool:
+                return pid == 1234
+
+            with (
+                patch("psutil.pid_exists", side_effect=pid_exists),
+                patch("psutil.Process", return_value=mock_proc),
+                patch("psutil.net_connections", return_value=[conn]),
+            ):
+                result = runner.invoke(main, ["status", "--json"], catch_exceptions=False)
+
+            data = json.loads(result.output)
+            entries = {e["name"]: e for e in data["managed"]}
+            backend = entries["backend"]
+            assert "depends_on" in backend
+            assert backend["depends_on"] == ["database"]
+            assert "dependency_status" in backend
+            assert backend["dependency_status"]["database"] in ("alive", "crashed", "dead")

@@ -207,6 +207,40 @@ class TestCheckHealth:
         assert r["healthy"] is False
         assert r["error"] is not None
 
+    # --- Cycle 12: degraded process (alive but dependency down) is unhealthy ---
+
+    def test_degraded_process_is_unhealthy(self, cfg: Config) -> None:
+        """Process is alive but has a dead dependency → health check is unhealthy."""
+        # Write database (dead) and backend (alive, depends_on=database)
+        database_record = ProcessRecord(
+            name="database", pid=9999, command="postgres", started_at=1000.0, depends_on=[]
+        )
+        backend_record = ProcessRecord(
+            name="backend",
+            pid=11111,
+            command="uvicorn main:app",
+            started_at=1000.0,
+            depends_on=["database"],
+        )
+        StateManager(cfg).write(database_record)
+        StateManager(cfg).write(backend_record)
+
+        def pid_exists(pid: int) -> bool:
+            return pid == 11111  # only backend alive
+
+        with (
+            patch("psutil.pid_exists", side_effect=pid_exists),
+            patch("psutil.Process", return_value=_alive_proc_mock()),
+            patch("psutil.net_connections", return_value=[_listen_conn(11111, 8000)]),
+            respx.mock,
+        ):
+            respx.get("http://localhost:8000/").mock(return_value=httpx.Response(200))
+            results = check_health(cfg)
+
+        backend_result = next(r for r in results if r["name"] == "backend")
+        assert backend_result["healthy"] is False
+        assert "degraded" in (backend_result["status"] or "")
+
     # --- Cycle 11: multiple processes ---
 
     def test_multiple_processes_all_checked(self, cfg: Config) -> None:

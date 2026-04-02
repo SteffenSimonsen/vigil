@@ -345,3 +345,143 @@ class TestDown:
             results = down(config, entries)
 
         assert results[0]["status"] == "not_running"
+
+
+# ---------------------------------------------------------------------------
+# depends_on — parsing, validation, topological ordering, blocked status
+# ---------------------------------------------------------------------------
+
+
+class TestDependsOn:
+    # Cycle 1: depends_on parsed into VigilEntry
+    def test_depends_on_parsed_into_entry(self, project: Path) -> None:
+        (project / "Vigilfile").write_text(
+            "[[process]]\n"
+            'name = "database"\n'
+            'command = "postgres"\n'
+            "\n"
+            "[[process]]\n"
+            'name = "backend"\n'
+            'command = "uvicorn main:app"\n'
+            'depends_on = ["database"]\n'
+        )
+        entries = load(project)
+        db = next(e for e in entries if e.name == "database")
+        backend = next(e for e in entries if e.name == "backend")
+        assert db.depends_on == []
+        assert backend.depends_on == ["database"]
+
+    # Cycle 4: topological start ordering
+    def test_up_starts_dependency_before_dependent(self, config: Config) -> None:
+        """When depends_on is set, dependency starts before its dependent."""
+        entries = [
+            VigilEntry(name="backend", command="echo backend", depends_on=["database"]),
+            VigilEntry(name="database", command="echo db"),
+        ]
+        started: list[str] = []
+
+        def fake_start(cfg: Config, name: str, command: str, **kwargs: object) -> MagicMock:
+            started.append(name)
+            rec = MagicMock()
+            rec.pid = 1234
+            rec.name = name
+            return rec
+
+        def fake_wait(cfg: Config, name: str, **kwargs: object) -> None:
+            pass
+
+        with (
+            patch("vigil.vigilfile._start", side_effect=fake_start),
+            patch("vigil.vigilfile._wait", side_effect=fake_wait),
+        ):
+            up(config, entries)
+
+        assert started.index("database") < started.index("backend")
+
+    # Cycle 5: blocked status when dependency fails readiness
+    def test_up_blocks_dependent_when_dependency_fails(self, config: Config) -> None:
+        """If a dependency fails, its dependents get status 'blocked' and are not started."""
+        entries = [
+            VigilEntry(name="database", command="echo db"),
+            VigilEntry(name="backend", command="echo backend", depends_on=["database"]),
+        ]
+        call_count = 0
+
+        def fake_start(cfg: Config, name: str, command: str, **kwargs: object) -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            rec = MagicMock()
+            rec.pid = 1234
+            rec.name = name
+            return rec
+
+        def fake_wait(cfg: Config, name: str, **kwargs: object) -> None:
+            if name == "database":
+                raise Exception("database not ready")
+
+        with (
+            patch("vigil.vigilfile._start", side_effect=fake_start),
+            patch("vigil.vigilfile._wait", side_effect=fake_wait),
+        ):
+            results = up(config, entries)
+
+        statuses = {r["name"]: r["status"] for r in results}
+        assert statuses["database"] == "failed"
+        assert statuses["backend"] == "blocked"
+        # backend should not have been started
+        assert call_count == 1
+
+    # Cycle 6: depends_on stored in state after up()
+    def test_up_stores_depends_on_in_state(self, config: Config) -> None:
+        """After up(), each process record in state has depends_on set."""
+        from vigil.state import ProcessRecord, StateManager
+
+        entries = [
+            VigilEntry(name="database", command="echo db"),
+            VigilEntry(name="backend", command="echo backend", depends_on=["database"]),
+        ]
+
+        def fake_start(cfg: Config, name: str, command: str, **kwargs: object) -> ProcessRecord:
+            rec = ProcessRecord(name=name, pid=1234, command=command, started_at=1000.0)
+            StateManager(cfg).write(rec)
+            return rec
+
+        def fake_wait(cfg: Config, name: str, **kwargs: object) -> None:
+            pass
+
+        with (
+            patch("vigil.vigilfile._start", side_effect=fake_start),
+            patch("vigil.vigilfile._wait", side_effect=fake_wait),
+        ):
+            up(config, entries)
+
+        records = {r.name: r for r in StateManager(config).read_all()}
+        assert records["backend"].depends_on == ["database"]
+        assert records["database"].depends_on == []
+
+    # Cycle 3: unknown dependency name
+    def test_unknown_dependency_raises_parse_error(self, project: Path) -> None:
+        (project / "Vigilfile").write_text(
+            "[[process]]\n"
+            'name = "backend"\n'
+            'command = "uvicorn main:app"\n'
+            'depends_on = ["nonexistent"]\n'
+        )
+        with pytest.raises(ParseError, match="nonexistent"):
+            load(project)
+
+    # Cycle 2: circular dependency detected at parse time
+    def test_circular_dependency_raises_parse_error(self, project: Path) -> None:
+        (project / "Vigilfile").write_text(
+            "[[process]]\n"
+            'name = "a"\n'
+            'command = "echo a"\n'
+            'depends_on = ["b"]\n'
+            "\n"
+            "[[process]]\n"
+            'name = "b"\n'
+            'command = "echo b"\n'
+            'depends_on = ["a"]\n'
+        )
+        with pytest.raises(ParseError, match="[Cc]ircular"):
+            load(project)
