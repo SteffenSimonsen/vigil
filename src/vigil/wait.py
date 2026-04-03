@@ -6,12 +6,14 @@ from __future__ import annotations
 import time
 
 from vigil.config import Config
-from vigil.crash_loop import CrashLooping
-from vigil.crash_loop import observe as _observe_crash_loop
+from vigil.registry import make_registry
 from vigil.scanner import ports_for_pid
-from vigil.state import StateManager
 
 __all__ = ["CrashLooping", "ProcessDied", "ProcessNotFound", "WaitTimeout", "wait_for_ready"]
+
+
+class CrashLooping(Exception):
+    """Raised when a managed process is detected as crash-looping (circuit open)."""
 
 
 class WaitTimeout(Exception):
@@ -46,27 +48,27 @@ def wait_for_ready(
     Raises WaitTimeout if *timeout* seconds elapse without readiness.
     Raises ProcessDied if the process dies while polling.
     """
-    state = StateManager(config)
     deadline = time.monotonic() + timeout
 
     while True:
-        records = {r.name: r for r in state.read_all()}
-        if name not in records:
+        reg = make_registry(config)
+        record = reg.get(name)
+        if record is None:
             raise ProcessNotFound(f"No managed process named {name!r}")
-        if not records[name].alive:
+        if not record.alive:
             raise ProcessDied(f"Process {name!r} died while waiting for readiness.")
 
         # Update crash-loop observation; fail fast if circuit is open
-        _observe_crash_loop(config, name)
-        updated = {r.name: r for r in state.read_all()}
-        if name in updated and updated[name].circuit_open:
-            count = updated[name].crash_count
+        observations = reg.observe_all()
+        obs = observations.get(name)
+        if obs and obs["circuit_open"]:
+            count = obs["crash_count"]
             raise CrashLooping(
                 f"Process {name!r} is crash-looping (crash_count={count}). "
                 f"Use 'vigil logs {name}' to investigate."
             )
 
-        pid = records[name].pid
+        pid = record.pid
 
         # Determine which port to check
         if port is not None:

@@ -187,11 +187,26 @@ class StateManager:
                 del raw[name]
                 self._save_raw(raw)
 
-    def update(self, name: str, **fields: int | str | float | bool | list[str] | None) -> None:
-        """Update specific fields of an existing record."""
+    def read_unannotated(self) -> list[ProcessRecord]:
+        """Return all records without liveness annotation (alive is always False)."""
+        raw = self._load_raw()
+        records: list[ProcessRecord] = []
+        try:
+            for item in raw.values():
+                records.append(ProcessRecord.from_dict(item))
+        except (KeyError, TypeError) as e:
+            raise StateCorruptedError("State file is corrupted or unreadable") from e
+        return records
+
+    def _update(self, name: str, **fields: int | str | float | bool | list[str] | None) -> None:
+        """Update specific fields of an existing record (internal API)."""
         with self._exclusive_lock():
             raw = self._load_raw()
             if name not in raw:
                 raise KeyError(f"No process named {name!r}")
             raw[name].update(fields)
             self._save_raw(raw)
+
+    def update(self, name: str, **fields: int | str | float | bool | list[str] | None) -> None:
+        """Update specific fields of an existing record."""
+        self._update(name, **fields)

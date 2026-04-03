@@ -9,8 +9,7 @@ import click
 
 from vigil.commands._shared import complete_process_names, json_error, require_project
 from vigil.config import Config
-from vigil.manager import ProcessNotFound
-from vigil.manager import restart as manager_restart
+from vigil.registry import ProcessNotFound, make_registry
 from vigil.state import StateCorruptedError
 
 
@@ -23,7 +22,7 @@ def cmd_restart(name: str, as_json: bool) -> None:
     config = Config(root=root)
 
     try:
-        record = manager_restart(config, name)
+        record = make_registry(config).restart(name)
     except StateCorruptedError as e:
         if as_json:
             json_error(str(e))

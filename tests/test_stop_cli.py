@@ -109,8 +109,8 @@ class TestStopCLI:
             try:
                 # After stop, port 3000 enters TIME_WAIT
                 with (
-                    patch("vigil.manager.ports_for_pid", return_value=[3000]),
-                    patch("vigil.manager.port_socket_state", return_value="time_wait"),
+                    patch("vigil.scanner.ports_for_pid", return_value=[3000]),
+                    patch("vigil.scanner.port_socket_state", return_value="time_wait"),
                 ):
                     result = runner.invoke(main, ["stop", "web", "--json"], catch_exceptions=False)
                 assert result.exit_code == 0, result.output

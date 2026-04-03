@@ -9,8 +9,7 @@ import click
 
 from vigil.commands._shared import json_error, require_project
 from vigil.config import Config
-from vigil.manager import ProcessAlreadyRunning, ProcessNotFound
-from vigil.manager import remove as manager_remove
+from vigil.registry import ProcessAlreadyRunning, ProcessNotFound, make_registry
 from vigil.state import StateCorruptedError
 
 
@@ -24,7 +23,7 @@ def cmd_remove(name: str, force: bool, as_json: bool) -> None:
     config = Config(root=root)
 
     try:
-        manager_remove(config, name, force=force)
+        make_registry(config).remove(name, force=force)
     except StateCorruptedError as e:
         if as_json:
             json_error(str(e))

@@ -9,8 +9,7 @@ import click
 
 from vigil.commands._shared import json_error, require_project
 from vigil.config import Config
-from vigil.manager import ProcessAlreadyRunning, ProcessCrashed
-from vigil.manager import start as manager_start
+from vigil.registry import ProcessAlreadyRunning, ProcessCrashed, make_registry
 from vigil.state import StateCorruptedError
 
 
@@ -49,8 +48,8 @@ def cmd_start(
             env[key] = val
 
     try:
-        record = manager_start(
-            config, name, command, force=force, env=env, env_file=env_file, cwd=cwd
+        record = make_registry(config).start(
+            name, command, force=force, env=env, env_file=env_file, cwd=cwd
         )
     except StateCorruptedError as e:
         if as_json:

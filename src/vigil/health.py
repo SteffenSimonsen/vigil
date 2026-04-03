@@ -8,8 +8,7 @@ import time
 from typing import TypedDict
 
 from vigil.config import Config
-from vigil.crash_loop import observe as _observe_crash_loop
-from vigil.state import StateManager
+from vigil.registry import make_registry
 
 
 class HealthResult(TypedDict):
@@ -49,29 +48,31 @@ def check_health(
     import psutil  # lazy: only loaded when vigil health is invoked
 
     effective_timeout = timeout if timeout is not None else config.health_check_timeout
-    state = StateManager(config)
-    all_records = state.read_all()
-    alive_names = {r.name for r in all_records if r.alive}
-    records = [r for r in all_records if r.alive]
+
+    reg = make_registry(config)
+    observations = reg.observe_all()
+    records = reg.all()
+
+    alive_names = {r.name for r in records if r.alive}
+    alive_records = [r for r in records if r.alive]
 
     # Snapshot the socket table once for all PID→port lookups in this invocation.
     conns = psutil.net_connections(kind="inet")
 
     results: list[HealthResult] = []
-    for record in records:
-        # Update crash-loop state and check circuit
-        _observe_crash_loop(config, record.name)
-        # Re-read updated record
-        updated = {r.name: r for r in StateManager(config).read_all()}
-        if record.name in updated and updated[record.name].circuit_open:
-            count = updated[record.name].crash_count
+    for record in alive_records:
+        obs = observations.get(record.name)
+        circuit_open = obs["circuit_open"] if obs else record.circuit_open
+        crash_count = obs["crash_count"] if obs else record.crash_count
+
+        if circuit_open:
             results.append(
                 HealthResult(
                     name=record.name,
                     healthy=False,
                     status="crash_looping",
                     latency_ms=None,
-                    error=f"Process is crash-looping (crash_count={count}). "
+                    error=f"Process is crash-looping (crash_count={crash_count}). "
                     f"Use 'vigil logs {record.name}' to investigate.",
                 )
             )

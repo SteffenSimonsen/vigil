@@ -11,10 +11,8 @@ from pathlib import Path
 from typing import Any, cast
 
 from vigil.config import Config
-from vigil.manager import ProcessAlreadyRunning, ProcessNotFound
-from vigil.manager import start as manager_start
-from vigil.manager import stop as manager_stop
-from vigil.state import ProcessRecord, StateManager
+from vigil.registry import ProcessAlreadyRunning, ProcessNotFound, make_registry
+from vigil.state import ProcessRecord
 from vigil.wait import WaitTimeout, wait_for_ready
 
 
@@ -136,7 +134,7 @@ def _topo_sorted(entries: list[VigilEntry]) -> list[VigilEntry]:
     return [by_name[name] for name in order if name in by_name]
 
 
-# Internal wrappers — thin delegates to manager/wait, patched in tests
+# Internal wrappers — thin delegates to registry/wait, patched in tests
 def _start(
     config: Config,
     name: str,
@@ -146,7 +144,7 @@ def _start(
     env: dict[str, str] | None = None,
     cwd: str | None = None,
 ) -> ProcessRecord:
-    return manager_start(config, name, command, force=force, env=env, cwd=cwd)
+    return make_registry(config).start(name, command, force=force, env=env, cwd=cwd)
 
 
 def _wait(
@@ -161,7 +159,7 @@ def _wait(
 
 
 def _stop(config: Config, name: str) -> None:
-    manager_stop(config, name)
+    make_registry(config).stop(name)
 
 
 def up(
@@ -230,7 +228,7 @@ def up(
         # Persist depends_on so status can compute degraded state
         if entry.depends_on:
             with contextlib.suppress(KeyError):
-                StateManager(config).update(entry.name, depends_on=entry.depends_on)
+                make_registry(config).set_depends_on(entry.name, entry.depends_on)
 
         results.append({"name": entry.name, "status": "started", "pid": rec.pid, "error": None})
 

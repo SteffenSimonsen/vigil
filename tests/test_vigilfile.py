@@ -182,7 +182,7 @@ class TestUp:
 
     def test_up_skips_already_alive(self, config: Config) -> None:
         """up() skips processes that are already running."""
-        from vigil.manager import ProcessAlreadyRunning
+        from vigil.registry import ProcessAlreadyRunning
 
         entries = _make_entries(("web", 1))
 
@@ -334,7 +334,7 @@ class TestDown:
 
     def test_down_not_found_recorded(self, config: Config) -> None:
         """If a process is not managed, down() records not_running."""
-        from vigil.manager import ProcessNotFound
+        from vigil.registry import ProcessNotFound
 
         entries = _make_entries(("web", 1))
 

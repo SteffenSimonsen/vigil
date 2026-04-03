@@ -9,9 +9,8 @@ import click
 
 from vigil.commands._shared import complete_process_names, json_error, require_project
 from vigil.config import Config
-from vigil.crash_loop import CrashLooping
 from vigil.state import StateCorruptedError
-from vigil.wait import ProcessDied, WaitTimeout, wait_for_ready
+from vigil.wait import CrashLooping, ProcessDied, WaitTimeout, wait_for_ready
 from vigil.wait import ProcessNotFound as WaitProcessNotFound
 
 
