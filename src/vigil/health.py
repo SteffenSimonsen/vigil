@@ -7,11 +7,8 @@ import socket
 import time
 from typing import TypedDict
 
-import httpx
-
 from vigil.config import Config
 from vigil.crash_loop import observe as _observe_crash_loop
-from vigil.scanner import ports_for_pid
 from vigil.state import StateManager
 
 
@@ -49,11 +46,16 @@ def check_health(
 
     Returns a list of HealthResult dicts, one per alive process.
     """
+    import psutil  # lazy: only loaded when vigil health is invoked
+
     effective_timeout = timeout if timeout is not None else config.health_check_timeout
     state = StateManager(config)
     all_records = state.read_all()
     alive_names = {r.name for r in all_records if r.alive}
     records = [r for r in all_records if r.alive]
+
+    # Snapshot the socket table once for all PID→port lookups in this invocation.
+    conns = psutil.net_connections(kind="inet")
 
     results: list[HealthResult] = []
     for record in records:
@@ -89,7 +91,12 @@ def check_health(
             )
             continue
 
-        ports = ports_for_pid(record.pid)
+        ports: list[int] = []
+        for c in conns:
+            if c.pid == record.pid and c.status == "LISTEN":
+                p = getattr(c.laddr, "port", None)
+                if isinstance(p, int):
+                    ports.append(p)
         if not ports:
             results.append(
                 HealthResult(
@@ -101,6 +108,8 @@ def check_health(
                 )
             )
             continue
+
+        import httpx  # lazy: only loaded when vigil health is invoked
 
         port = ports[0]
         url = f"http://localhost:{port}{endpoint}"

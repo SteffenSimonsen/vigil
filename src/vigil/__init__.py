@@ -1,6 +1,9 @@
-from importlib.metadata import version, PackageNotFoundError
+def __getattr__(name: str) -> str:
+    if name == "__version__":
+        from importlib.metadata import PackageNotFoundError, version
 
-try:
-    __version__ = version("vigil")
-except PackageNotFoundError:
-    __version__ = "unknown"
+        try:
+            return version("vigil")
+        except PackageNotFoundError:
+            return "unknown"
+    raise AttributeError(name)

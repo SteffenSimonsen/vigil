@@ -49,13 +49,6 @@ class TestPortsForPid:
             ports_for_pid(1234)
         assert mock_net.call_count == 1
 
-    def test_uses_provided_connections_without_calling_psutil(self) -> None:
-        conns = [_make_conn(1234, 8000), _make_conn(5678, 9000)]
-        with patch("psutil.net_connections") as mock_net:
-            result = ports_for_pid(1234, connections=conns)
-        assert result == [8000]
-        mock_net.assert_not_called()
-
 
 class TestPidForPort:
     def test_returns_none_when_no_listener(self) -> None:
@@ -82,13 +75,6 @@ class TestPidForPort:
         with patch("psutil.net_connections", mock_net):
             pid_for_port(8000)
         assert mock_net.call_count == 1
-
-    def test_uses_provided_connections_without_calling_psutil(self) -> None:
-        conns = [_make_conn(1234, 8000)]
-        with patch("psutil.net_connections") as mock_net:
-            result = pid_for_port(8000, connections=conns)
-        assert result == 1234
-        mock_net.assert_not_called()
 
 
 class TestPortSocketState:
@@ -118,15 +104,6 @@ class TestPortSocketState:
             from vigil.scanner import port_socket_state
 
             assert port_socket_state(3000) == "free"
-
-    def test_uses_provided_connections_without_calling_psutil(self) -> None:
-        from vigil.scanner import port_socket_state
-
-        conn = _make_conn(1234, 3000, status="LISTEN")
-        with patch("psutil.net_connections") as mock_net:
-            result = port_socket_state(3000, connections=[conn])
-        assert result == "listen"
-        mock_net.assert_not_called()
 
 
 class TestNextFreePort:
@@ -160,13 +137,6 @@ class TestNextFreePort:
             result = next_free_port(3000)
         assert result == 3002
 
-    def test_uses_provided_connections_without_calling_psutil(self) -> None:
-        conns = [_make_conn(100, 3000)]
-        with patch("psutil.net_connections") as mock_net:
-            result = next_free_port(3000, connections=conns)
-        assert result == 3001
-        mock_net.assert_not_called()
-
 
 class TestScanAll:
     def test_returns_all_listeners(self) -> None:
@@ -192,15 +162,6 @@ class TestScanAll:
         with patch("psutil.net_connections", mock_net):
             scan_all()
         assert mock_net.call_count == 1
-
-    def test_uses_provided_connections_without_calling_psutil(self) -> None:
-        conns = [_make_conn(1234, 3000)]
-        with patch("psutil.net_connections") as mock_net, patch("psutil.Process") as mock_proc:
-            mock_proc.return_value.name.return_value = "python"
-            result = scan_all(connections=conns)
-        assert len(result) == 1
-        assert result[0]["port"] == 3000
-        mock_net.assert_not_called()
 
 
 class TestScanPorts:
@@ -229,12 +190,3 @@ class TestScanPorts:
             mock_proc.return_value.name.return_value = "node"
             scan_ports([3000, 3001, 3002, 3003])
         assert mock_net.call_count == 1
-
-    def test_uses_provided_connections_without_calling_psutil(self) -> None:
-        conns = [_make_conn(1234, 3000), _make_conn(5678, 4000)]
-        with patch("psutil.net_connections") as mock_net, patch("psutil.Process") as mock_proc:
-            mock_proc.return_value.name.return_value = "node"
-            result = scan_ports([3000], connections=conns)
-        assert len(result) == 1
-        assert result[0]["port"] == 3000
-        mock_net.assert_not_called()

@@ -5,8 +5,6 @@ from __future__ import annotations
 
 import time
 
-import httpx
-
 from vigil.config import Config
 from vigil.crash_loop import CrashLooping
 from vigil.crash_loop import observe as _observe_crash_loop
@@ -82,6 +80,8 @@ def wait_for_ready(
             if http_path is None:
                 return  # Port open, no HTTP check required
             # HTTP check — any response (including 4xx/5xx) counts as ready
+            import httpx  # lazy: only loaded when --http is used
+
             url = f"http://localhost:{ready_port}{http_path}"
             try:
                 httpx.get(url, timeout=2.0)
