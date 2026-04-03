@@ -11,8 +11,6 @@ from collections.abc import Generator
 from dataclasses import dataclass, field
 from typing import Any
 
-import psutil
-
 from vigil.config import Config
 
 
@@ -86,6 +84,8 @@ def _is_pid_alive(pid: int, started_at: float | None) -> bool:
     When *started_at* is None the check falls back to PID existence only —
     used when psutil create_time was unavailable at spawn time.
     """
+    import psutil  # lazy: only needed when liveness is checked
+
     if not psutil.pid_exists(pid):
         return False
     if started_at is None:
