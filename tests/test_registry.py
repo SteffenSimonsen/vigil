@@ -232,6 +232,43 @@ class TestObserveAll:
         assert record.crash_count == 5
 
 
+# ── Cycle 5: DefaultSpawner / DefaultKiller / DefaultLivenessChecker end-to-end
+
+
+class TestDefaultSpawnerKillerLiveness:
+    def test_start_and_stop_real_process(self, config: Config, tmp_path: Path) -> None:
+        """DefaultSpawner starts a real process; DefaultKiller stops it; DefaultLivenessChecker
+        detects both states."""
+        import contextlib
+
+        import psutil
+
+        from vigil.registry import make_registry
+
+        reg = make_registry(config)
+        record = reg.start("web", "sleep 60")
+        pid = record.pid
+
+        try:
+            # Process is alive immediately after start
+            assert psutil.pid_exists(pid)
+
+            entry = reg.get("web")
+            assert entry is not None
+            assert entry.alive is True
+
+            # Stop it
+            result = reg.stop("web")
+
+            # Process is gone
+            assert not psutil.pid_exists(pid)
+            assert result["status"] == "stopped"
+            assert reg.get("web") is None
+        finally:
+            with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+                psutil.Process(pid).kill()
+
+
 # ── Cycle 6: stop_all collects all results even when one stop fails ───────────
 
 
