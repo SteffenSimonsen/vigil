@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
-from click.shell_completion import CompletionItem
 
 from vigil.config import Config, ConfigError, find_vigil_root
 from vigil.state import StateManager
+
+if TYPE_CHECKING:
+    from click.shell_completion import CompletionItem
 
 
 def json_error(message: str, code: int = 1) -> None:
@@ -34,6 +37,8 @@ def complete_process_names(
     ctx: click.Context, param: click.Parameter, incomplete: str
 ) -> list[CompletionItem]:
     """Shell completion callback: return process names from the statefile."""
+    from click.shell_completion import CompletionItem
+
     try:
         root = find_vigil_root(Path.cwd())
         config = Config(root=root)
