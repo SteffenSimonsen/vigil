@@ -334,3 +334,32 @@ class TestStopAll:
         assert by_name["web"]["status"] == "stopped"
         assert by_name["cache"]["status"] == "stopped"
         assert by_name["db"]["status"] == "error"
+
+    def test_stop_all_error_entry_includes_exception_message(self, config: Config) -> None:
+        """stop_all() error entry must include the exception message."""
+        _write_record(config, name="db", pid=99002)
+
+        killer = FakeKiller()
+        killer.raise_on(99002)
+        liveness = FakeLivenessChecker(alive_pids={99002})
+
+        reg = ProcessRegistry(config, killer=killer, liveness_checker=liveness)
+        results = reg.stop_all()
+
+        assert len(results) == 1
+        assert results[0]["status"] == "error"
+        assert results[0]["error"] == "kill failed for pid 99002"
+
+    def test_stop_all_success_entry_has_no_error(self, config: Config) -> None:
+        """stop_all() successful entry must have error=None."""
+        _write_record(config, name="web", pid=99001)
+
+        killer = FakeKiller()
+        liveness = FakeLivenessChecker(alive_pids={99001})
+
+        reg = ProcessRegistry(config, killer=killer, liveness_checker=liveness)
+        results = reg.stop_all()
+
+        assert len(results) == 1
+        assert results[0]["status"] == "stopped"
+        assert results[0]["error"] is None

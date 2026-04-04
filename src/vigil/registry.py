@@ -42,6 +42,7 @@ class StopResult(TypedDict):
 class StopAllEntry(TypedDict):
     name: str
     status: str
+    error: str | None
     time_wait_ports: list[int]
 
 
@@ -362,14 +363,16 @@ class ProcessRegistry:
                     StopAllEntry(
                         name=record.name,
                         status=result["status"],
+                        error=None,
                         time_wait_ports=result["time_wait_ports"],
                     )
                 )
-            except Exception:
+            except Exception as exc:
                 results.append(
                     StopAllEntry(
                         name=record.name,
                         status="error",
+                        error=str(exc),
                         time_wait_ports=[],
                     )
                 )

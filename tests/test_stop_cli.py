@@ -156,6 +156,48 @@ class TestStopCLI:
         assert result.exit_code == 0
         assert "different vigil session" not in result.output
 
+    def test_stop_all_text_shows_error_message(self, runner: CliRunner) -> None:
+        """vigil stop --all text output shows error message for failed entries."""
+        from unittest.mock import MagicMock
+
+        from vigil.registry import StopAllEntry
+
+        error_result = [
+            StopAllEntry(name="db", status="error", error="permission denied", time_wait_ports=[]),
+        ]
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            with patch("vigil.commands.stop.make_registry") as mock_reg:
+                mock_reg.return_value = MagicMock()
+                mock_reg.return_value.stop_all.return_value = error_result
+                result = runner.invoke(main, ["stop", "--all"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        assert "permission denied" in result.output
+
+    def test_stop_all_json_includes_error_field(self, runner: CliRunner) -> None:
+        """vigil stop --all --json includes the error field for each entry."""
+        from unittest.mock import MagicMock
+
+        from vigil.registry import StopAllEntry
+
+        results = [
+            StopAllEntry(name="db", status="error", error="permission denied", time_wait_ports=[]),
+            StopAllEntry(name="web", status="stopped", error=None, time_wait_ports=[]),
+        ]
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            with patch("vigil.commands.stop.make_registry") as mock_reg:
+                mock_reg.return_value = MagicMock()
+                mock_reg.return_value.stop_all.return_value = results
+                result = runner.invoke(main, ["stop", "--all", "--json"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        by_name = {p["name"]: p for p in data["processes"]}
+        assert by_name["db"]["error"] == "permission denied"
+        assert by_name["web"]["error"] is None
+
     def test_stop_all_json_includes_cleaned_up_status(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()

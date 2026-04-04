@@ -39,6 +39,9 @@ def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool, force: bool) 
                 for r in results:
                     if r["status"] == "stopped":
                         click.echo(f"  \u2713 {r['name']} stopped")
+                    elif r["status"] == "error":
+                        msg = r.get("error") or "unknown error"
+                        click.echo(f"  \u2717 {r['name']} error: {msg}")
                     else:
                         click.echo(f"  \u2713 {r['name']} cleaned up (was crashed)")
             else:
