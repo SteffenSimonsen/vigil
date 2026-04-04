@@ -71,8 +71,6 @@ class HealthChecker:
         alive_names: set[str],
         observations: Mapping[str, CrashObservation],
     ) -> HealthResult:
-        import httpx
-
         obs = observations.get(record.name)
         circuit_open = obs["circuit_open"] if obs else record.circuit_open
         crash_count = obs["crash_count"] if obs else record.crash_count
@@ -114,6 +112,8 @@ class HealthChecker:
         url = f"http://localhost:{port}{self._endpoint}"
         effective_timeout = self._effective_timeout()
         t0 = time.monotonic()
+        import httpx
+
         try:
             status_code = self._http_prober.get(url, timeout=effective_timeout)
             latency_ms = (time.monotonic() - t0) * 1000
