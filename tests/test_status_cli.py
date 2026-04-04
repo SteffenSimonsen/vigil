@@ -604,3 +604,60 @@ class TestDegradedStatus:
             assert backend["depends_on"] == ["database"]
             assert "dependency_status" in backend
             assert backend["dependency_status"]["database"] in ("alive", "crashed", "dead")
+
+
+class TestStatusNetConnectionsCallCount:
+    def test_net_connections_called_once_for_port_display_with_multiple_alive_processes(
+        self, runner: CliRunner
+    ) -> None:
+        """With N alive processes (no port configured), net_connections for port
+        display should be called exactly once, not once per process."""
+        start_time = time.time() - 10
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            # port: None so observe_all skips net_connections (no crash-loop check)
+            # All net_connections calls come solely from the display loop.
+            _write_state(
+                Path(".vigil"),
+                {
+                    "web": {
+                        "name": "web",
+                        "pid": 1001,
+                        "command": "python -m http.server 8001",
+                        "started_at": start_time,
+                        "port": None,
+                        "cwd": None,
+                    },
+                    "api": {
+                        "name": "api",
+                        "pid": 1002,
+                        "command": "python -m http.server 8002",
+                        "started_at": start_time,
+                        "port": None,
+                        "cwd": None,
+                    },
+                    "worker": {
+                        "name": "worker",
+                        "pid": 1003,
+                        "command": "python worker.py",
+                        "started_at": start_time,
+                        "port": None,
+                        "cwd": None,
+                    },
+                },
+            )
+            mock_proc = MagicMock()
+            mock_proc.create_time.return_value = start_time + 0.1
+
+            with (
+                patch("psutil.pid_exists", return_value=True),
+                patch("psutil.Process", return_value=mock_proc),
+                patch("psutil.net_connections", return_value=[]) as mock_nc,
+            ):
+                result = runner.invoke(main, ["status", "--json"], catch_exceptions=False)
+
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert len(data["managed"]) == 3
+            # After fix: exactly 1 call (snapshot before loop), not 3 (one per process)
+            assert mock_nc.call_count == 1

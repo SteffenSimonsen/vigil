@@ -111,6 +111,18 @@ def ports_for_pid(pid: int) -> list[int]:
     return result
 
 
+def ports_by_pid(pids: set[int]) -> dict[int, list[int]]:
+    """Return {pid: [port, ...]} for all given PIDs in a single socket table read."""
+    conns = psutil.net_connections(kind="inet")
+    result: dict[int, list[int]] = {pid: [] for pid in pids}
+    for c in conns:
+        if c.pid in result and c.status == "LISTEN":
+            port = getattr(c.laddr, "port", None)
+            if isinstance(port, int):
+                result[c.pid].append(port)
+    return result
+
+
 def pid_for_port(port: int) -> int | None:
     """Return the PID listening on this port, or None if nothing is listening.
 
