@@ -5,18 +5,35 @@ from __future__ import annotations
 
 import socket
 import time
-from typing import TypedDict
+from collections.abc import Mapping
+from typing import Protocol, TypedDict
 
 from vigil.config import Config
-from vigil.registry import make_registry
+from vigil.registry import CrashObservation, ProcessRegistry, make_registry
+from vigil.state import ProcessRecord
 
 
 class HealthResult(TypedDict):
     name: str
     healthy: bool
+    ready: bool
     status: str | None
     latency_ms: float | None
     error: str | None
+
+
+class HttpProber(Protocol):
+    def get(self, url: str, *, timeout: float) -> int:
+        """Perform a GET. Returns HTTP status code. Raises httpx.RequestError on failure."""
+        ...
+
+
+class _DefaultHttpProber:
+    def get(self, url: str, *, timeout: float) -> int:
+        import httpx
+
+        response = httpx.get(url, timeout=timeout)
+        return response.status_code
 
 
 def _tcp_check(port: int, timeout: float) -> tuple[bool, str | None]:
@@ -27,6 +44,121 @@ def _tcp_check(port: int, timeout: float) -> tuple[bool, str | None]:
         return True, None
     except OSError as exc:
         return False, str(exc)
+
+
+class HealthChecker:
+    def __init__(
+        self,
+        registry: ProcessRegistry,
+        *,
+        endpoint: str = "/",
+        timeout: float | None = None,
+        http_prober: HttpProber | None = None,
+    ) -> None:
+        self._registry = registry
+        self._endpoint = endpoint
+        self._timeout = timeout
+        self._http_prober: HttpProber = http_prober or _DefaultHttpProber()
+
+    def _effective_timeout(self) -> float:
+        if self._timeout is not None:
+            return self._timeout
+        return self._registry.config.health_check_timeout
+
+    def _check_record(
+        self,
+        record: ProcessRecord,
+        alive_names: set[str],
+        observations: Mapping[str, CrashObservation],
+    ) -> HealthResult:
+        import httpx
+
+        obs = observations.get(record.name)
+        circuit_open = obs["circuit_open"] if obs else record.circuit_open
+        crash_count = obs["crash_count"] if obs else record.crash_count
+
+        if circuit_open:
+            return HealthResult(
+                name=record.name,
+                healthy=False,
+                ready=False,
+                status="crash_looping",
+                latency_ms=None,
+                error=f"Process is crash-looping (crash_count={crash_count}). "
+                f"Use 'vigil logs {record.name}' to investigate.",
+            )
+
+        dead_deps = [d for d in record.depends_on if d not in alive_names]
+        if dead_deps:
+            return HealthResult(
+                name=record.name,
+                healthy=False,
+                ready=False,
+                status="degraded",
+                latency_ms=None,
+                error=f"dependency down: {', '.join(dead_deps)}",
+            )
+
+        ports = self._registry.ports_for_pid(record.pid)
+        if not ports:
+            return HealthResult(
+                name=record.name,
+                healthy=True,
+                ready=False,
+                status="no-port",
+                latency_ms=None,
+                error=None,
+            )
+
+        port = ports[0]
+        url = f"http://localhost:{port}{self._endpoint}"
+        effective_timeout = self._effective_timeout()
+        t0 = time.monotonic()
+        try:
+            status_code = self._http_prober.get(url, timeout=effective_timeout)
+            latency_ms = (time.monotonic() - t0) * 1000
+            return HealthResult(
+                name=record.name,
+                healthy=True,
+                ready=True,
+                status=str(status_code),
+                latency_ms=latency_ms,
+                error=None,
+            )
+        except (httpx.RequestError, httpx.InvalidURL):
+            latency_ms = (time.monotonic() - t0) * 1000
+            tcp_ok, tcp_err = _tcp_check(port, timeout=effective_timeout)
+            return HealthResult(
+                name=record.name,
+                healthy=tcp_ok,
+                ready=False,
+                status="tcp-ok" if tcp_ok else None,
+                latency_ms=latency_ms,
+                error=None if tcp_ok else tcp_err,
+            )
+
+    def check_all(self) -> list[HealthResult]:
+        """Check health of all alive managed processes. Single statefile read."""
+        records = self._registry.all()
+        observations = self._registry.observe_all(records=records)
+
+        alive_names = {r.name for r in records if r.alive}
+        alive_records = [r for r in records if r.alive]
+
+        return [self._check_record(r, alive_names, observations) for r in alive_records]
+
+    def check_one(self, name: str) -> HealthResult | None:
+        """Check health of a single process. Returns None if not found or dead."""
+        records = self._registry.all()
+        observations = self._registry.observe_all(records=records)
+
+        alive_names = {r.name for r in records if r.alive}
+
+        record = next((r for r in records if r.name == name), None)
+        if record is None or not record.alive:
+            return None
+
+        return self._check_record(record, alive_names, observations)
 
 
 def check_health(
@@ -45,100 +177,5 @@ def check_health(
 
     Returns a list of HealthResult dicts, one per alive process.
     """
-    import psutil  # lazy: only loaded when vigil health is invoked
-
-    effective_timeout = timeout if timeout is not None else config.health_check_timeout
-
     reg = make_registry(config)
-    observations = reg.observe_all()
-    records = reg.all()
-
-    alive_names = {r.name for r in records if r.alive}
-    alive_records = [r for r in records if r.alive]
-
-    # Snapshot the socket table once for all PID→port lookups in this invocation.
-    conns = psutil.net_connections(kind="inet")
-
-    results: list[HealthResult] = []
-    for record in alive_records:
-        obs = observations.get(record.name)
-        circuit_open = obs["circuit_open"] if obs else record.circuit_open
-        crash_count = obs["crash_count"] if obs else record.crash_count
-
-        if circuit_open:
-            results.append(
-                HealthResult(
-                    name=record.name,
-                    healthy=False,
-                    status="crash_looping",
-                    latency_ms=None,
-                    error=f"Process is crash-looping (crash_count={crash_count}). "
-                    f"Use 'vigil logs {record.name}' to investigate.",
-                )
-            )
-            continue
-
-        # Degraded: alive but a dependency is down
-        dead_deps = [d for d in record.depends_on if d not in alive_names]
-        if dead_deps:
-            results.append(
-                HealthResult(
-                    name=record.name,
-                    healthy=False,
-                    status="degraded",
-                    latency_ms=None,
-                    error=f"dependency down: {', '.join(dead_deps)}",
-                )
-            )
-            continue
-
-        ports: list[int] = []
-        for c in conns:
-            if c.pid == record.pid and c.status == "LISTEN":
-                p = getattr(c.laddr, "port", None)
-                if isinstance(p, int):
-                    ports.append(p)
-        if not ports:
-            results.append(
-                HealthResult(
-                    name=record.name,
-                    healthy=True,
-                    status="no-port",
-                    latency_ms=None,
-                    error=None,
-                )
-            )
-            continue
-
-        import httpx  # lazy: only loaded when vigil health is invoked
-
-        port = ports[0]
-        url = f"http://localhost:{port}{endpoint}"
-        t0 = time.monotonic()
-        try:
-            response = httpx.get(url, timeout=effective_timeout)
-            latency_ms = (time.monotonic() - t0) * 1000
-            results.append(
-                HealthResult(
-                    name=record.name,
-                    healthy=True,
-                    status=str(response.status_code),
-                    latency_ms=latency_ms,
-                    error=None,
-                )
-            )
-        except (httpx.RequestError, httpx.HTTPStatusError, httpx.InvalidURL):
-            # HTTP failed — fall back to TCP connect
-            latency_ms = (time.monotonic() - t0) * 1000
-            tcp_ok, tcp_err = _tcp_check(port, timeout=effective_timeout)
-            results.append(
-                HealthResult(
-                    name=record.name,
-                    healthy=tcp_ok,
-                    status="tcp-ok" if tcp_ok else None,
-                    latency_ms=latency_ms,
-                    error=None if tcp_ok else tcp_err,
-                )
-            )
-
-    return results
+    return HealthChecker(reg, endpoint=endpoint, timeout=timeout).check_all()

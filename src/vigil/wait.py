@@ -7,7 +7,6 @@ import time
 
 from vigil.config import Config
 from vigil.registry import make_registry
-from vigil.scanner import ports_for_pid
 
 __all__ = ["CrashLooping", "ProcessDied", "ProcessNotFound", "WaitTimeout", "wait_for_ready"]
 
@@ -49,9 +48,9 @@ def wait_for_ready(
     Raises ProcessDied if the process dies while polling.
     """
     deadline = time.monotonic() + timeout
+    reg = make_registry(config)
 
     while True:
-        reg = make_registry(config)
         record = reg.get(name)
         if record is None:
             raise ProcessNotFound(f"No managed process named {name!r}")
@@ -69,13 +68,12 @@ def wait_for_ready(
             )
 
         pid = record.pid
+        pid_ports = reg.ports_for_pid(pid)
 
         # Determine which port to check
         if port is not None:
-            pid_ports = ports_for_pid(pid)
             ready_port: int | None = port if port in pid_ports else None
         else:
-            pid_ports = ports_for_pid(pid)
             ready_port = pid_ports[0] if pid_ports else None
 
         if ready_port is not None:

@@ -379,13 +379,20 @@ class ProcessRegistry:
 
     # ── Observation ───────────────────────────────────────────────────────────
 
-    def observe_all(self, *, crash_threshold: int = 5) -> dict[str, CrashObservation]:
+    def observe_all(
+        self,
+        records: list[ProcessRecord] | None = None,
+        *,
+        crash_threshold: int = 5,
+    ) -> dict[str, CrashObservation]:
         """Update crash-loop state for all processes and return observations.
 
+        If *records* is provided, use it directly (avoids a second statefile read).
         Returns results directly — callers do not need to re-read state.
         """
         state = StateManager(self._config)
-        records = self._read_records()
+        if records is None:
+            records = self._read_records()
         results: dict[str, CrashObservation] = {}
 
         for record in records:
@@ -455,6 +462,14 @@ class ProcessRegistry:
 
     def registry_pids(self) -> set[int]:
         return {r.pid for r in self._read_records()}
+
+    @property
+    def config(self) -> Config:
+        return self._config
+
+    def ports_for_pid(self, pid: int) -> list[int]:
+        """Return TCP ports this PID is listening on, via the injected PortProber."""
+        return self._port_prober.listening_ports(pid)
 
 
 # ── Factory ───────────────────────────────────────────────────────────────────
