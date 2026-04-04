@@ -25,6 +25,8 @@ def find_orphans(project_root: Path, registry_pids: set[int]) -> list[OrphanProc
     project_root = project_root.resolve()
     orphans: list[OrphanProcess] = []
 
+    ports_by_pid = _snapshot_listening_ports()
+
     for proc in psutil.process_iter():
         if proc.pid in registry_pids:
             continue
@@ -51,27 +53,25 @@ def find_orphans(project_root: Path, registry_pids: set[int]) -> list[OrphanProc
         except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
             continue
 
-        ports = _listening_ports(proc.pid)
-
         orphans.append(
             OrphanProcess(
                 pid=proc.pid,
                 command=command,
                 cwd=cwd,
-                ports=ports,
+                ports=ports_by_pid.get(proc.pid, []),
             )
         )
 
     return orphans
 
 
-def _listening_ports(pid: int) -> list[int]:
-    """Return TCP ports this PID is listening on. Returns [] on any error."""
-    ports: list[int] = []
+def _snapshot_listening_ports() -> dict[int, list[int]]:
+    """Snapshot all listening TCP ports keyed by PID. Returns {} on any error."""
+    ports_by_pid: dict[int, list[int]] = {}
     with contextlib.suppress(Exception):
         for conn in psutil.net_connections(kind="inet"):
-            if conn.pid == pid and conn.status == "LISTEN":
+            if conn.status == "LISTEN" and conn.pid is not None:
                 port = getattr(conn.laddr, "port", None)
                 if isinstance(port, int):
-                    ports.append(port)
-    return ports
+                    ports_by_pid.setdefault(conn.pid, []).append(port)
+    return ports_by_pid
