@@ -13,7 +13,6 @@ from vigil.commands._shared import json_error, require_project
 from vigil.config import Config
 from vigil.docker import lookup as docker_lookup
 from vigil.registry import make_registry
-from vigil.scanner import ports_by_pid
 from vigil.state import StateCorruptedError
 
 
@@ -46,8 +45,6 @@ def cmd_status(as_json: bool) -> None:
         sys.exit(1)
 
     alive_names = {r.name for r in records if r.alive}
-    alive_pids = {r.pid for r in records if r.alive}
-    pid_ports = ports_by_pid(alive_pids) if alive_pids else {}
 
     managed: list[dict[str, Any]] = []
     for record in records:
@@ -74,7 +71,7 @@ def cmd_status(as_json: bool) -> None:
                     }
                 )
             else:
-                entry_ports = pid_ports.get(record.pid, [])
+                entry_ports = obs["ports"] if obs else []
                 dead_deps = [d for d in record.depends_on if d not in alive_names]
                 status = "degraded" if dead_deps else "alive"
                 dep_status = {

@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from vigil.config import Config
 from vigil.registry import ProcessRegistry
 from vigil.state import ProcessRecord, StateManager
+
+
+def _listen_conn(pid: int, port: int) -> MagicMock:
+    """Return a mock net connection in LISTEN state."""
+    conn = MagicMock()
+    conn.pid = pid
+    conn.status = "LISTEN"
+    conn.laddr.port = port
+    return conn
 
 
 @pytest.fixture
@@ -184,17 +194,16 @@ class TestObserveAll:
         # Process alive, has port, port is NOT listening → crash observation
         _write_record(config, name="web", pid=99001, port=8080, crash_count=0)
 
-        port_prober = FakePortProber(listening={99001: []})  # port absent
         liveness = FakeLivenessChecker(alive_pids={99001})
 
         reg = ProcessRegistry(
             config,
-            port_prober=port_prober,
             liveness_checker=liveness,
             clock=lambda: 5000.0,
         )
 
-        observations = reg.observe_all()
+        with patch("psutil.net_connections", return_value=[]):  # port absent
+            observations = reg.observe_all()
         records_after = reg.all()
 
         assert "web" in observations
@@ -211,17 +220,17 @@ class TestObserveAll:
         """After crash_threshold port-absent observations, circuit_open becomes True."""
         _write_record(config, name="web", pid=99001, port=8080, crash_count=4)
 
-        port_prober = FakePortProber(listening={99001: []})  # port absent
         liveness = FakeLivenessChecker(alive_pids={99001})
 
         reg = ProcessRegistry(
             config,
-            port_prober=port_prober,
             liveness_checker=liveness,
             clock=lambda: 5000.0,
         )
 
-        observations = reg.observe_all(crash_threshold=5)
+        with patch("psutil.net_connections", return_value=[]):  # port absent
+            observations = reg.observe_all(crash_threshold=5)
+
         assert observations["web"]["circuit_open"] is True
         assert observations["web"]["crash_count"] == 5
 
@@ -230,6 +239,32 @@ class TestObserveAll:
         assert record is not None
         assert record.circuit_open is True
         assert record.crash_count == 5
+
+    def test_observe_all_snapshots_net_connections_once(self, config: Config) -> None:
+        """observe_all() calls net_connections() exactly once for N records with ports."""
+        _write_record(config, name="web", pid=99001, port=8080)
+        _write_record(config, name="api", pid=99002, port=9090)
+
+        liveness = FakeLivenessChecker(alive_pids={99001, 99002})
+        reg = ProcessRegistry(config, liveness_checker=liveness, clock=lambda: 5000.0)
+
+        with patch("psutil.net_connections", return_value=[]) as mock_conns:
+            reg.observe_all()
+
+        assert mock_conns.call_count == 1
+
+    def test_observe_all_includes_ports_in_observation(self, config: Config) -> None:
+        """CrashObservation includes the listening ports for the process."""
+        _write_record(config, name="web", pid=99001, port=8080)
+
+        liveness = FakeLivenessChecker(alive_pids={99001})
+        reg = ProcessRegistry(config, liveness_checker=liveness, clock=lambda: 5000.0)
+
+        conn = _listen_conn(99001, 8080)
+        with patch("psutil.net_connections", return_value=[conn]):
+            observations = reg.observe_all()
+
+        assert observations["web"]["ports"] == [8080]
 
 
 # ── Cycle 5: DefaultSpawner / DefaultKiller / DefaultLivenessChecker end-to-end

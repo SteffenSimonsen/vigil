@@ -51,14 +51,17 @@ def wait_for_ready(
     reg = make_registry(config)
 
     while True:
-        record = reg.get(name)
+        records = reg.all()
+        record = next((r for r in records if r.name == name), None)
         if record is None:
             raise ProcessNotFound(f"No managed process named {name!r}")
         if not record.alive:
             raise ProcessDied(f"Process {name!r} died while waiting for readiness.")
 
-        # Update crash-loop observation; fail fast if circuit is open
-        observations = reg.observe_all()
+        # Update crash-loop observation; fail fast if circuit is open.
+        # Pass records= to avoid a second statefile read; observe_all snapshots
+        # net_connections once internally and exposes per-process ports in obs["ports"].
+        observations = reg.observe_all(records=records)
         obs = observations.get(name)
         if obs and obs["circuit_open"]:
             count = obs["crash_count"]
@@ -67,8 +70,7 @@ def wait_for_ready(
                 f"Use 'vigil logs {name}' to investigate."
             )
 
-        pid = record.pid
-        pid_ports = reg.ports_for_pid(pid)
+        pid_ports = obs["ports"] if obs is not None else []
 
         # Determine which port to check
         if port is not None:

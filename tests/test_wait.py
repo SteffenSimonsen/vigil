@@ -164,3 +164,35 @@ class TestWaitForReady:
             pytest.raises(WaitTimeout),
         ):
             wait_for_ready(cfg, "web", timeout=0.05, interval=0.01, port=9000)
+
+    def test_net_connections_called_once_per_tick(self, cfg: Config) -> None:
+        """wait_for_ready calls net_connections exactly once per polling tick.
+
+        Records with a port field trigger observe_all's crash-loop check AND the
+        readiness port check. Before the fix, each ran a separate net_connections()
+        call; after the fix there is exactly one call per tick.
+        """
+        # Write a record with port=8080 so observe_all's snapshot path is exercised
+        record = ProcessRecord(
+            name="web", pid=12345, command="python -m http.server", started_at=1000.0, port=8080
+        )
+        from vigil.state import StateManager
+
+        StateManager(cfg).write(record)
+
+        call_counter = 0
+
+        def _counting_net_connections(*_: object, **__: object) -> list[MagicMock]:
+            nonlocal call_counter
+            call_counter += 1
+            return [_listen_conn(12345, 8080)]
+
+        with (
+            patch("psutil.pid_exists", return_value=True),
+            patch("psutil.Process", return_value=_alive_proc_mock()),
+            patch("psutil.net_connections", side_effect=_counting_net_connections),
+        ):
+            wait_for_ready(cfg, "web", timeout=5, interval=0.01)
+
+        # Port opened immediately → exactly 1 tick → exactly 1 net_connections call
+        assert call_counter == 1

@@ -49,6 +49,7 @@ class CrashObservation(TypedDict):
     circuit_open: bool
     crash_count: int
     last_crash_at: float | None
+    ports: list[int]
 
 
 # ── OS-boundary protocols ─────────────────────────────────────────────────────
@@ -390,9 +391,16 @@ class ProcessRegistry:
         If *records* is provided, use it directly (avoids a second statefile read).
         Returns results directly — callers do not need to re-read state.
         """
+        from vigil.scanner import ports_by_pid
+
         state = StateManager(self._config)
         if records is None:
             records = self._read_records()
+
+        # Snapshot the socket table once for all alive processes.
+        alive_pids = {r.pid for r in records if r.alive}
+        pid_ports_map = ports_by_pid(alive_pids) if alive_pids else {}
+
         results: dict[str, CrashObservation] = {}
 
         for record in records:
@@ -402,21 +410,23 @@ class ProcessRegistry:
                     circuit_open=record.circuit_open,
                     crash_count=record.crash_count,
                     last_crash_at=record.last_crash_at,
+                    ports=pid_ports_map.get(record.pid, []) if record.alive else [],
                 )
                 continue
 
-            listening = self._port_prober.listening_ports(record.pid)
+            listening = pid_ports_map.get(record.pid, [])
             if record.port in listening:
                 if record.circuit_open or record.crash_count > 0:
                     state.update(name, crash_count=0, last_crash_at=None, circuit_open=False)
                     results[name] = CrashObservation(
-                        circuit_open=False, crash_count=0, last_crash_at=None
+                        circuit_open=False, crash_count=0, last_crash_at=None, ports=listening
                     )
                 else:
                     results[name] = CrashObservation(
                         circuit_open=False,
                         crash_count=record.crash_count,
                         last_crash_at=record.last_crash_at,
+                        ports=listening,
                     )
                 continue
 
@@ -426,6 +436,7 @@ class ProcessRegistry:
                     circuit_open=True,
                     crash_count=record.crash_count,
                     last_crash_at=record.last_crash_at,
+                    ports=listening,
                 )
                 continue
 
@@ -442,6 +453,7 @@ class ProcessRegistry:
                 circuit_open=circuit_open,
                 crash_count=new_count,
                 last_crash_at=last_crash_at,
+                ports=listening,
             )
 
         return results
