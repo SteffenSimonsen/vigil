@@ -248,14 +248,24 @@ class ProcessRegistry:
         assert port is not None
         state = port_socket_state(port)
         if state == "listen":
+            import contextlib
+
+            import psutil
+
             from vigil.scanner import pid_for_port
 
             holder_pid = pid_for_port(port)
-            raise PortOccupied(
-                f"Port {port} is already in use"
-                + (f" (pid {holder_pid})" if holder_pid else "")
-                + "."
-            )
+            holder_name: str | None = None
+            if holder_pid is not None:
+                with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
+                    holder_name = psutil.Process(holder_pid).name()
+            suffix = ""
+            if holder_pid is not None:
+                suffix = f" (pid {holder_pid}"
+                if holder_name:
+                    suffix += f", {holder_name}"
+                suffix += ")"
+            raise PortOccupied(f"Port {port} is already in use{suffix}.")
         return port
 
     def start(
