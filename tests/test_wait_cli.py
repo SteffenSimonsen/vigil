@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -187,7 +188,18 @@ class TestWaitCLI:
             )
             log_dir = Path(".vigil") / "logs"
             log_dir.mkdir()
-            (log_dir / "web.log").write_text("worker ready\n")
+            log_path = log_dir / "web.log"
+            log_path.write_text("")  # empty at start
+
+            def _append_after_delay() -> None:
+                import time
+
+                time.sleep(0.05)
+                with log_path.open("a") as f:
+                    f.write("worker ready\n")
+
+            t = threading.Thread(target=_append_after_delay, daemon=True)
+            t.start()
             with (
                 patch("psutil.pid_exists", return_value=True),
                 patch("psutil.Process", return_value=_alive_proc_mock()),
@@ -198,6 +210,7 @@ class TestWaitCLI:
                     ["wait", "web", "--log-match", "worker ready", "--timeout", "5", "--json"],
                     catch_exceptions=False,
                 )
+            t.join(timeout=1)
             assert result.exit_code == 0
 
     def test_ready_cmd_exits_0_when_command_succeeds(self, runner: CliRunner) -> None:
@@ -241,6 +254,36 @@ class TestWaitCLI:
             assert result.exit_code == 2
             data = json.loads(result.output)
             assert data["status"] == "port_mismatch"
+
+    def test_log_match_and_port_are_mutually_exclusive(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            cfg = Config(root=Path("."))
+            StateManager(cfg).write(
+                ProcessRecord(name="web", pid=12345, command="...", started_at=1000.0)
+            )
+            result = runner.invoke(
+                main, ["wait", "web", "--log-match", "ready", "--port", "8080", "--json"]
+            )
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert "--log-match" in data["error"] or "mutually exclusive" in data["error"]
+
+    def test_log_match_and_http_are_mutually_exclusive(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            cfg = Config(root=Path("."))
+            StateManager(cfg).write(
+                ProcessRecord(name="web", pid=12345, command="...", started_at=1000.0)
+            )
+            result = runner.invoke(
+                main, ["wait", "web", "--log-match", "ready", "--http=/health", "--json"]
+            )
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert "--log-match" in data["error"] or "mutually exclusive" in data["error"]
 
     def test_port_override(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():

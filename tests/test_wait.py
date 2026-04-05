@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -168,11 +169,21 @@ class TestWaitForReady:
     # --- log_match strategy ---
 
     def test_log_match_returns_when_line_appears(self, cfg: Config) -> None:
-        """wait_for_ready with log_match returns when a matching line appears in the log."""
+        """log_match returns when a matching line is appended after wait starts."""
         _write_record(cfg)
         log_path = cfg.logs_dir / "web.log"
         cfg.logs_dir.mkdir(parents=True, exist_ok=True)
-        log_path.write_text("worker ready\n")  # line already in log on first tick
+        log_path.write_text("")  # empty at start — pre-existing content is irrelevant
+
+        def _append_after_delay() -> None:
+            import time
+
+            time.sleep(0.05)
+            with log_path.open("a") as f:
+                f.write("worker ready\n")
+
+        t = threading.Thread(target=_append_after_delay, daemon=True)
+        t.start()
 
         with (
             patch("psutil.pid_exists", return_value=True),
@@ -180,6 +191,8 @@ class TestWaitForReady:
             patch("psutil.net_connections", return_value=[]),  # no port
         ):
             wait_for_ready(cfg, "web", timeout=5, interval=0.01, log_match="worker ready")
+
+        t.join(timeout=1)
 
     def test_log_match_timeout_when_pattern_never_appears(self, cfg: Config) -> None:
         """wait_for_ready with log_match raises WaitTimeout if pattern never matches."""
@@ -194,6 +207,33 @@ class TestWaitForReady:
             pytest.raises(WaitTimeout),
         ):
             wait_for_ready(cfg, "web", timeout=0.05, interval=0.01, log_match="never_matches")
+
+    def test_log_match_ignores_lines_written_before_wait_starts(self, cfg: Config) -> None:
+        """wait_for_ready seeks to EOF on open; pre-existing lines must not trigger readiness."""
+        _write_record(cfg)
+        cfg.logs_dir.mkdir(parents=True, exist_ok=True)
+        # Write the matching pattern BEFORE calling wait — must be ignored
+        (cfg.logs_dir / "web.log").write_text("worker ready\n")
+
+        with (
+            patch("psutil.pid_exists", return_value=True),
+            patch("psutil.Process", return_value=_alive_proc_mock()),
+            patch("psutil.net_connections", return_value=[]),
+            pytest.raises(WaitTimeout),
+        ):
+            wait_for_ready(cfg, "web", timeout=0.05, interval=0.01, log_match="worker ready")
+
+    def test_log_match_raises_process_died_when_process_dies(self, cfg: Config) -> None:
+        """wait_for_ready with log_match raises ProcessDied if process dies before match."""
+        _write_record(cfg)
+        cfg.logs_dir.mkdir(parents=True, exist_ok=True)
+        (cfg.logs_dir / "web.log").write_text("")
+
+        with (
+            patch("psutil.pid_exists", return_value=False),  # process already dead
+            pytest.raises(ProcessDied),
+        ):
+            wait_for_ready(cfg, "web", timeout=5, interval=0.01, log_match="never_matches")
 
     # --- ready_cmd strategy ---
 

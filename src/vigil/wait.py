@@ -66,13 +66,14 @@ def wait_for_ready(
     deadline = time.monotonic() + timeout
     reg = make_registry(config)
 
-    # For log_match: open log file once and scan from beginning for the regex.
+    # For log_match: open log file once, seek to EOF so pre-existing lines are skipped.
     log_file = None
     log_pattern = re.compile(log_match) if log_match else None
     if log_match:
         log_path = Path(config.logs_dir) / f"{name}.log"
         if log_path.exists():
             log_file = log_path.open("r")
+            log_file.seek(0, 2)  # seek to end: only match lines written after wait starts
 
     try:
         while True:

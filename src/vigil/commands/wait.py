@@ -76,6 +76,22 @@ def cmd_wait(
             click.echo("Error: Endpoint must start with /")
         sys.exit(1)
 
+    if log_match is not None and port_override is not None:
+        msg = "--log-match is mutually exclusive with --port"
+        if as_json:
+            click.echo(json.dumps({"error": msg}))
+        else:
+            click.echo(f"Error: {msg}")
+        sys.exit(1)
+
+    if log_match is not None and http_path is not None:
+        msg = "--log-match is mutually exclusive with --http"
+        if as_json:
+            click.echo(json.dumps({"error": msg}))
+        else:
+            click.echo(f"Error: {msg}")
+        sys.exit(1)
+
     root = require_project(as_json)
     config = Config(root=root)
 
