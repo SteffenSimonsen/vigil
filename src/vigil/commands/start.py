@@ -9,7 +9,7 @@ import click
 
 from vigil.commands._shared import json_error, require_project
 from vigil.config import Config
-from vigil.registry import ProcessAlreadyRunning, ProcessCrashed, make_registry
+from vigil.registry import PortOccupied, ProcessAlreadyRunning, ProcessCrashed, make_registry
 from vigil.state import StateCorruptedError
 
 
@@ -26,6 +26,8 @@ from vigil.state import StateCorruptedError
 )
 @click.option("--cwd", default=None, help="Working directory for the child process.")
 @click.option("--env-file", "env_file", default=None, help="Load env vars from a .env file.")
+@click.option("--auto-port", "auto_port", is_flag=True, help="Assign a free port automatically.")
+@click.option("--port", "explicit_port", default=None, type=int, help="Request a specific port.")
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 def cmd_start(
     name: str,
@@ -34,6 +36,8 @@ def cmd_start(
     env_vars: tuple[str, ...],
     cwd: str | None,
     env_file: str | None,
+    auto_port: bool,
+    explicit_port: int | None,
     as_json: bool,
 ) -> None:
     """Start a named process."""
@@ -49,7 +53,14 @@ def cmd_start(
 
     try:
         record = make_registry(config).start(
-            name, command, force=force, env=env, env_file=env_file, cwd=cwd
+            name,
+            command,
+            force=force,
+            env=env,
+            env_file=env_file,
+            cwd=cwd,
+            auto_port=auto_port,
+            port=explicit_port,
         )
     except StateCorruptedError as e:
         if as_json:
@@ -66,13 +77,22 @@ def cmd_start(
             json_error(str(e))
         click.echo(str(e), err=True)
         sys.exit(1)
+    except PortOccupied as e:
+        if as_json:
+            json_error(str(e))
+        click.echo(str(e), err=True)
+        sys.exit(1)
     except (FileNotFoundError, PermissionError, ValueError) as e:
         if as_json:
             json_error(str(e))
         click.echo(str(e), err=True)
         sys.exit(1)
 
+    out: dict[str, object] = {"name": record.name, "pid": record.pid, "status": "started"}
+    if record.port is not None:
+        out["port"] = record.port
+
     if as_json:
-        click.echo(json.dumps({"name": record.name, "pid": record.pid, "status": "started"}))
+        click.echo(json.dumps(out))
     else:
         click.echo(f"Started {record.name!r} (pid {record.pid})")

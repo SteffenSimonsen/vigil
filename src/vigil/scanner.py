@@ -69,16 +69,19 @@ def scan_all() -> list[Listener]:
     return _snapshot()
 
 
-def next_free_port(start: int = 3000, count: int = 1) -> int | list[int]:
+def next_free_port(start: int = 3000, count: int = 1, *, end: int | None = None) -> int | list[int]:
     """Find free port(s) starting from *start*.
 
     Reads the OS socket table exactly once. Returns a single int when
     count=1, or a list[int] when count>1.
 
-    Raises ValueError if start > 65535 or no free ports exist below 65536.
+    If *end* is given, the search is bounded to [start, end] (inclusive).
+    Raises ValueError if start > 65535, no free ports exist below 65536,
+    or no free port exists within [start, end].
     """
     if start > 65535:
         raise ValueError(f"start port {start} is above the maximum valid port 65535")
+    ceiling = min(end, 65535) if end is not None else 65535
     conns = psutil.net_connections(kind="inet")
     occupied: set[int] = set()
     for c in conns:
@@ -88,7 +91,9 @@ def next_free_port(start: int = 3000, count: int = 1) -> int | list[int]:
     found: list[int] = []
     port = start
     while len(found) < count:
-        if port > 65535:
+        if port > ceiling:
+            if end is not None:
+                raise ValueError(f"no free port available in range [{start}, {end}]")
             raise ValueError("no free ports available below 65536")
         if port not in occupied:
             found.append(port)

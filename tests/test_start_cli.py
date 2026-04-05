@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import psutil
 import pytest
@@ -356,6 +357,77 @@ class TestStartCLI:
                 if pid is not None:
                     with contextlib.suppress(Exception):
                         psutil.Process(pid).kill()
+
+    def test_start_auto_port_json_includes_port(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            with patch("psutil.net_connections", return_value=[]):
+                result = runner.invoke(
+                    main,
+                    [
+                        "start",
+                        "web",
+                        "python -c 'import time; time.sleep(30)'",
+                        "--auto-port",
+                        "--json",
+                    ],
+                    catch_exceptions=False,
+                )
+            pid: int | None = None
+            try:
+                assert result.exit_code == 0, result.output
+                data = json.loads(result.output)
+                pid = data["pid"]
+                assert "port" in data
+                assert isinstance(data["port"], int)
+            finally:
+                if pid is not None:
+                    with contextlib.suppress(Exception):
+                        psutil.Process(pid).kill()
+
+    def test_start_explicit_port_json_includes_port(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            with patch("psutil.net_connections", return_value=[]):
+                result = runner.invoke(
+                    main,
+                    [
+                        "start",
+                        "web",
+                        "python -c 'import time; time.sleep(30)'",
+                        "--port",
+                        "7777",
+                        "--json",
+                    ],
+                    catch_exceptions=False,
+                )
+            pid: int | None = None
+            try:
+                assert result.exit_code == 0, result.output
+                data = json.loads(result.output)
+                pid = data["pid"]
+                assert data["port"] == 7777
+            finally:
+                if pid is not None:
+                    with contextlib.suppress(Exception):
+                        psutil.Process(pid).kill()
+
+    def test_start_auto_port_and_explicit_port_mutually_exclusive(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            result = runner.invoke(
+                main,
+                [
+                    "start",
+                    "web",
+                    "sleep 1",
+                    "--auto-port",
+                    "--port",
+                    "3000",
+                    "--json",
+                ],
+            )
+            assert result.exit_code != 0
 
     def test_start_env_flag(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():

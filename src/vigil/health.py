@@ -98,6 +98,18 @@ class HealthChecker:
             )
 
         ports = self._registry.ports_for_pid(record.pid)
+
+        # PortMismatch: process has an assigned port but is listening elsewhere.
+        if record.port is not None and ports and record.port not in ports:
+            return HealthResult(
+                name=record.name,
+                healthy=False,
+                ready=False,
+                status="port_mismatch",
+                latency_ms=None,
+                error=(f"Process was assigned port {record.port} but is listening on {ports}."),
+            )
+
         if not ports:
             return HealthResult(
                 name=record.name,

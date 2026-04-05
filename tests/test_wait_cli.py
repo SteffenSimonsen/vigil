@@ -178,6 +178,70 @@ class TestWaitCLI:
             data = json.loads(result.output)
             assert "error" in data
 
+    def test_log_match_exits_0_when_line_matches(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            cfg = Config(root=Path("."))
+            StateManager(cfg).write(
+                ProcessRecord(name="web", pid=12345, command="...", started_at=1000.0)
+            )
+            log_dir = Path(".vigil") / "logs"
+            log_dir.mkdir()
+            (log_dir / "web.log").write_text("worker ready\n")
+            with (
+                patch("psutil.pid_exists", return_value=True),
+                patch("psutil.Process", return_value=_alive_proc_mock()),
+                patch("psutil.net_connections", return_value=[]),
+            ):
+                result = runner.invoke(
+                    main,
+                    ["wait", "web", "--log-match", "worker ready", "--timeout", "5", "--json"],
+                    catch_exceptions=False,
+                )
+            assert result.exit_code == 0
+
+    def test_ready_cmd_exits_0_when_command_succeeds(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            cfg = Config(root=Path("."))
+            StateManager(cfg).write(
+                ProcessRecord(name="web", pid=12345, command="...", started_at=1000.0)
+            )
+            with (
+                patch("psutil.pid_exists", return_value=True),
+                patch("psutil.Process", return_value=_alive_proc_mock()),
+                patch("psutil.net_connections", return_value=[]),
+                patch("subprocess.run", return_value=MagicMock(returncode=0)),
+            ):
+                result = runner.invoke(
+                    main,
+                    ["wait", "web", "--ready-cmd", "true", "--timeout", "5", "--json"],
+                    catch_exceptions=False,
+                )
+            assert result.exit_code == 0
+
+    def test_port_mismatch_exits_2(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            cfg = Config(root=Path("."))
+            StateManager(cfg).write(
+                ProcessRecord(name="web", pid=12345, command="...", started_at=1000.0, port=8080)
+            )
+            with (
+                patch("psutil.pid_exists", return_value=True),
+                patch("psutil.Process", return_value=_alive_proc_mock()),
+                # Process listening on 9999 instead of assigned 8080
+                patch("psutil.net_connections", return_value=[_listen_conn(12345, 9999)]),
+            ):
+                result = runner.invoke(
+                    main,
+                    ["wait", "web", "--timeout", "5", "--json"],
+                    catch_exceptions=False,
+                )
+            assert result.exit_code == 2
+            data = json.loads(result.output)
+            assert data["status"] == "port_mismatch"
+
     def test_port_override(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()

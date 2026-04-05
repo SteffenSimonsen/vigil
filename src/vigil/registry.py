@@ -31,6 +31,10 @@ class ProcessCrashed(Exception):
     """Raised when a process is registered but dead and force=False."""
 
 
+class PortOccupied(Exception):
+    """Raised when a requested port is already in use."""
+
+
 # ── Result types ─────────────────────────────────────────────────────────────
 
 
@@ -229,6 +233,31 @@ class ProcessRegistry:
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
+    def _resolve_port(self, auto_port: bool, port: int | None) -> int | None:
+        """Pick or validate a port. Returns the resolved port, or None if neither requested."""
+        if auto_port and port is not None:
+            raise ValueError("--auto-port and --port are mutually exclusive")
+        if not auto_port and port is None:
+            return None
+        from vigil.scanner import next_free_port, port_socket_state
+
+        if auto_port:
+            start, end = self._config.port_range
+            return next_free_port(start, end=end)  # type: ignore[return-value]
+        # explicit port requested
+        assert port is not None
+        state = port_socket_state(port)
+        if state == "listen":
+            from vigil.scanner import pid_for_port
+
+            holder_pid = pid_for_port(port)
+            raise PortOccupied(
+                f"Port {port} is already in use"
+                + (f" (pid {holder_pid})" if holder_pid else "")
+                + "."
+            )
+        return port
+
     def start(
         self,
         name: str,
@@ -239,6 +268,8 @@ class ProcessRegistry:
         env_file: str | None = None,
         cwd: str | None = None,
         depends_on: list[str] | None = None,
+        auto_port: bool = False,
+        port: int | None = None,
     ) -> ProcessRecord:
         state = StateManager(self._config)
         existing = {r.name: r for r in self._read_records()}
@@ -274,6 +305,8 @@ class ProcessRegistry:
         if not command.strip():
             raise ValueError("Command cannot be empty")
 
+        resolved_port = self._resolve_port(auto_port, port)
+
         effective_cwd = str(Path(cwd) if cwd else self._config.root)
         log_path = str(self._config.logs_dir / f"{name}.log")
         self._config.logs_dir.mkdir(parents=True, exist_ok=True)
@@ -286,6 +319,9 @@ class ProcessRegistry:
             file_vars = {k: v for k, v in loaded.items() if v is not None}
 
         merged_env: dict[str, str] = {**file_vars, **(env or {})}
+        # Inject PORT env var if a port was assigned (explicit env takes precedence)
+        if resolved_port is not None and "PORT" not in merged_env:
+            merged_env["PORT"] = str(resolved_port)
         recorded_env_keys = sorted(merged_env.keys())
 
         child_env: dict[str, str] | None = None
@@ -293,8 +329,13 @@ class ProcessRegistry:
             child_env = os.environ.copy()
             child_env.update(merged_env)
 
+        # Substitute {PORT} in command string
+        spawn_command = command
+        if resolved_port is not None:
+            spawn_command = command.replace("{PORT}", str(resolved_port))
+
         pid, started_at = self._spawner.spawn(
-            command,
+            spawn_command,
             cwd=effective_cwd,
             env=child_env,
             log_path=log_path,
@@ -305,6 +346,7 @@ class ProcessRegistry:
             pid=pid,
             command=command,
             started_at=started_at,
+            port=resolved_port,
             cwd=effective_cwd,
             env_file=env_file,
             env_keys=recorded_env_keys,

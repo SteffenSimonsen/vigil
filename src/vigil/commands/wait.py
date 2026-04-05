@@ -10,7 +10,7 @@ import click
 from vigil.commands._shared import complete_process_names, json_error, require_project
 from vigil.config import Config
 from vigil.state import StateCorruptedError
-from vigil.wait import CrashLooping, ProcessDied, WaitTimeout, wait_for_ready
+from vigil.wait import CrashLooping, PortMismatch, ProcessDied, WaitTimeout, wait_for_ready
 from vigil.wait import ProcessNotFound as WaitProcessNotFound
 
 
@@ -40,12 +40,28 @@ class _HttpOptionCommand(click.Command):
     metavar="PATH",
     help="Wait for HTTP response on PATH. Use --http for / or --http=/health for a custom path.",
 )
+@click.option(
+    "--log-match",
+    "log_match",
+    default=None,
+    type=str,
+    help="Wait until this regex matches a line in the process log.",
+)
+@click.option(
+    "--ready-cmd",
+    "ready_cmd",
+    default=None,
+    type=str,
+    help="Wait until this shell command exits 0.",
+)
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 def cmd_wait(
     name: str,
     timeout: float,
     port_override: int | None,
     http_path: str | None,
+    log_match: str | None,
+    ready_cmd: str | None,
     as_json: bool,
 ) -> None:
     """Block until a managed process is ready (port open, optional HTTP check).
@@ -64,10 +80,24 @@ def cmd_wait(
     config = Config(root=root)
 
     try:
-        wait_for_ready(config, name, timeout=timeout, port=port_override, http_path=http_path)
+        wait_for_ready(
+            config,
+            name,
+            timeout=timeout,
+            port=port_override,
+            http_path=http_path,
+            log_match=log_match,
+            ready_cmd=ready_cmd,
+        )
     except CrashLooping as e:
         if as_json:
             click.echo(json.dumps({"name": name, "status": "crash_looping", "error": str(e)}))
+        else:
+            click.echo(str(e), err=True)
+        sys.exit(2)
+    except PortMismatch as e:
+        if as_json:
+            click.echo(json.dumps({"name": name, "status": "port_mismatch", "error": str(e)}))
         else:
             click.echo(str(e), err=True)
         sys.exit(2)

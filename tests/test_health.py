@@ -310,6 +310,21 @@ class TestHealthChecker:
         assert result is not None
         assert result["ready"] is False
 
+    # --- Cycle 19: port_mismatch — assigned port but listening elsewhere ---
+
+    def test_port_mismatch_status(self, cfg: Config) -> None:
+        """Process with assigned port 8080 but listening on 9999 → port_mismatch."""
+        _write_record(cfg, pid=12345, port=8080)  # record.port = 8080
+        # PortProber returns 9999, not 8080
+        reg = _reg(cfg, alive_pids={12345}, pid_to_ports={12345: [9999]})
+        results = HealthChecker(reg).check_all()
+
+        assert len(results) == 1
+        r = results[0]
+        assert r["healthy"] is False
+        assert r["ready"] is False
+        assert r["status"] == "port_mismatch"
+
     # --- Cycle 18: InvalidURL caught and reported ---
 
     def test_invalid_url_caught_and_reported_as_unhealthy(self, cfg: Config) -> None:

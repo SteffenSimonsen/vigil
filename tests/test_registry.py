@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from vigil.config import Config
-from vigil.registry import ProcessRegistry
+from vigil.registry import PortOccupied, ProcessRegistry
 from vigil.state import ProcessRecord, StateManager
 
 
@@ -302,6 +302,116 @@ class TestDefaultSpawnerKillerLiveness:
         finally:
             with contextlib.suppress(psutil.NoSuchProcess, psutil.AccessDenied):
                 psutil.Process(pid).kill()
+
+
+# ── Cycle 5b: port ownership ─────────────────────────────────────────────────
+
+
+class FakePortProberWithNext:
+    """PortProber that simulates a specific port being free or occupied."""
+
+    def __init__(self, free_port: int = 3500, occupied_ports: set[int] | None = None) -> None:
+        self._free_port = free_port
+        self._occupied: set[int] = occupied_ports or set()
+
+    def listening_ports(self, pid: int) -> list[int]:
+        return []
+
+    def port_state(self, port: int) -> str:
+        if port in self._occupied:
+            return "listen"
+        return "free"
+
+
+class TestPortOwnership:
+    def test_auto_port_picks_port_from_port_range(self, config: Config) -> None:
+        """start(auto_port=True) picks a free port within config.port_range."""
+        spawner = FakeSpawner(pid=99001)
+        liveness = FakeLivenessChecker()
+
+        reg = ProcessRegistry(config, spawner=spawner, liveness_checker=liveness)
+
+        with patch("psutil.net_connections", return_value=[]):
+            record = reg.start("web", "uvicorn app:app", auto_port=True)
+
+        start, end = config.port_range
+        assert record.port is not None
+        assert start <= record.port <= end
+
+    def test_auto_port_injects_PORT_env_var(self, config: Config) -> None:
+        """start(auto_port=True) injects PORT=<n> into the child environment."""
+        spawner = FakeSpawner(pid=99001)
+        liveness = FakeLivenessChecker()
+
+        reg = ProcessRegistry(config, spawner=spawner, liveness_checker=liveness)
+
+        with patch("psutil.net_connections", return_value=[]):
+            record = reg.start("web", "uvicorn app:app", auto_port=True)
+
+        assert record.port is not None
+        call_env = spawner.calls[0]["env"]
+        assert isinstance(call_env, dict)
+        assert call_env.get("PORT") == str(record.port)
+
+    def test_auto_port_substitutes_PORT_in_command(self, config: Config) -> None:
+        """start(auto_port=True) substitutes {PORT} in the command string."""
+        spawner = FakeSpawner(pid=99001)
+        liveness = FakeLivenessChecker()
+
+        reg = ProcessRegistry(config, spawner=spawner, liveness_checker=liveness)
+
+        with patch("psutil.net_connections", return_value=[]):
+            reg.start("web", "uvicorn app:app --port {PORT}", auto_port=True)
+
+        spawned_command: str = spawner.calls[0]["command"]  # type: ignore[assignment]
+        assert "{PORT}" not in spawned_command
+        assert spawned_command.startswith("uvicorn app:app --port ")
+
+    def test_auto_port_writes_port_to_record(self, config: Config) -> None:
+        """start(auto_port=True) persists record.port to the statefile."""
+        spawner = FakeSpawner(pid=99001)
+        liveness = FakeLivenessChecker()
+
+        reg = ProcessRegistry(config, spawner=spawner, liveness_checker=liveness)
+
+        with patch("psutil.net_connections", return_value=[]):
+            record = reg.start("web", "uvicorn app:app", auto_port=True)
+
+        persisted = reg.get("web")
+        assert persisted is not None
+        assert persisted.port == record.port
+
+    def test_explicit_port_granted_when_free(self, config: Config) -> None:
+        """start(port=3000) succeeds when port 3000 is free."""
+        spawner = FakeSpawner(pid=99001)
+        liveness = FakeLivenessChecker()
+
+        reg = ProcessRegistry(config, spawner=spawner, liveness_checker=liveness)
+
+        with patch("psutil.net_connections", return_value=[]):
+            record = reg.start("web", "uvicorn app:app", port=3000)
+
+        assert record.port == 3000
+
+    def test_explicit_port_raises_when_occupied(self, config: Config) -> None:
+        """start(port=3000) raises PortOccupied when port 3000 is already in use."""
+        spawner = FakeSpawner(pid=99001)
+        liveness = FakeLivenessChecker()
+
+        reg = ProcessRegistry(config, spawner=spawner, liveness_checker=liveness)
+
+        conn = _listen_conn(pid=55555, port=3000)
+        with (
+            patch("psutil.net_connections", return_value=[conn]),
+            pytest.raises(PortOccupied, match="3000"),
+        ):
+            reg.start("web", "uvicorn app:app", port=3000)
+
+    def test_auto_port_and_explicit_port_are_mutually_exclusive(self, config: Config) -> None:
+        """start(auto_port=True, port=3000) raises ValueError."""
+        reg = ProcessRegistry(config)
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            reg.start("web", "uvicorn app:app", auto_port=True, port=3000)
 
 
 # ── Cycle 6: stop_all collects all results even when one stop fails ───────────

@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections import namedtuple
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from vigil.scanner import next_free_port, pid_for_port, ports_for_pid, scan_all, scan_ports
 
 _MockAddr = namedtuple("MockAddr", ["ip", "port"])
@@ -107,6 +109,22 @@ class TestPortSocketState:
 
 
 class TestNextFreePort:
+    def test_end_param_raises_when_no_free_port_in_range(self) -> None:
+        """next_free_port(3000, end=3001) raises ValueError when 3000 and 3001 are occupied."""
+        conns = [_make_conn(1, 3000), _make_conn(2, 3001)]
+        with (
+            patch("psutil.net_connections", return_value=conns),
+            pytest.raises(ValueError, match="no free port"),
+        ):
+            next_free_port(3000, end=3001)
+
+    def test_end_param_stops_search_at_upper_bound(self) -> None:
+        """next_free_port(3000, end=3002) returns 3001 when 3000 occupied."""
+        conns = [_make_conn(1, 3000)]
+        with patch("psutil.net_connections", return_value=conns):
+            result = next_free_port(3000, end=3002)
+        assert result == 3001
+
     def test_returns_start_when_free(self) -> None:
         with patch("psutil.net_connections", return_value=[]):
             result = next_free_port(3000)

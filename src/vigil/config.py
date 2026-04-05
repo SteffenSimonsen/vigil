@@ -17,9 +17,14 @@ class Config:
 
     root: Path
     log_retention_lines: int = 500
-    scan_port_range: tuple[int, int] = field(default_factory=lambda: (3000, 9999))
+    port_range: tuple[int, int] = field(default_factory=lambda: (3000, 9999))
     health_check_timeout: int = 5
     stop_grace_period: int = 5
+
+    @property
+    def scan_port_range(self) -> tuple[int, int]:
+        """Backward-compatible alias for port_range."""
+        return self.port_range
 
     @property
     def vigil_dir(self) -> Path:
@@ -62,9 +67,12 @@ def load_config(root: Path | None = None) -> Config:
         defaults = data.get("defaults", {})
         if "log_retention_lines" in defaults:
             config.log_retention_lines = int(defaults["log_retention_lines"])
-        if "scan_port_range" in defaults:
+        if "port_range" in defaults:
+            r = defaults["port_range"]
+            config.port_range = (int(r[0]), int(r[1]))
+        elif "scan_port_range" in defaults:
             r = defaults["scan_port_range"]
-            config.scan_port_range = (int(r[0]), int(r[1]))
+            config.port_range = (int(r[0]), int(r[1]))
         if "health_check_timeout" in defaults:
             config.health_check_timeout = int(defaults["health_check_timeout"])
         if "stop_grace_period" in defaults:

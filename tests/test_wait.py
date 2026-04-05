@@ -11,7 +11,7 @@ import respx
 
 from vigil.config import Config
 from vigil.state import ProcessRecord, StateManager
-from vigil.wait import ProcessDied, WaitTimeout, wait_for_ready
+from vigil.wait import ProcessDied, ProcessNotFound, WaitTimeout, wait_for_ready  # noqa: F401
 
 
 @pytest.fixture
@@ -164,6 +164,73 @@ class TestWaitForReady:
             pytest.raises(WaitTimeout),
         ):
             wait_for_ready(cfg, "web", timeout=0.05, interval=0.01, port=9000)
+
+    # --- log_match strategy ---
+
+    def test_log_match_returns_when_line_appears(self, cfg: Config) -> None:
+        """wait_for_ready with log_match returns when a matching line appears in the log."""
+        _write_record(cfg)
+        log_path = cfg.logs_dir / "web.log"
+        cfg.logs_dir.mkdir(parents=True, exist_ok=True)
+        log_path.write_text("worker ready\n")  # line already in log on first tick
+
+        with (
+            patch("psutil.pid_exists", return_value=True),
+            patch("psutil.Process", return_value=_alive_proc_mock()),
+            patch("psutil.net_connections", return_value=[]),  # no port
+        ):
+            wait_for_ready(cfg, "web", timeout=5, interval=0.01, log_match="worker ready")
+
+    def test_log_match_timeout_when_pattern_never_appears(self, cfg: Config) -> None:
+        """wait_for_ready with log_match raises WaitTimeout if pattern never matches."""
+        _write_record(cfg)
+        cfg.logs_dir.mkdir(parents=True, exist_ok=True)
+        (cfg.logs_dir / "web.log").write_text("")
+
+        with (
+            patch("psutil.pid_exists", return_value=True),
+            patch("psutil.Process", return_value=_alive_proc_mock()),
+            patch("psutil.net_connections", return_value=[]),
+            pytest.raises(WaitTimeout),
+        ):
+            wait_for_ready(cfg, "web", timeout=0.05, interval=0.01, log_match="never_matches")
+
+    # --- ready_cmd strategy ---
+
+    def test_ready_cmd_returns_when_command_exits_zero(self, cfg: Config) -> None:
+        """wait_for_ready with ready_cmd returns when the command exits 0."""
+        _write_record(cfg)
+        with (
+            patch("psutil.pid_exists", return_value=True),
+            patch("psutil.Process", return_value=_alive_proc_mock()),
+            patch("psutil.net_connections", return_value=[]),
+            patch("subprocess.run", return_value=MagicMock(returncode=0)),
+        ):
+            wait_for_ready(cfg, "web", timeout=5, interval=0.01, ready_cmd="true")
+
+    def test_ready_cmd_retries_until_zero(self, cfg: Config) -> None:
+        """wait_for_ready with ready_cmd retries until the command exits 0."""
+        _write_record(cfg)
+        results = [MagicMock(returncode=1), MagicMock(returncode=1), MagicMock(returncode=0)]
+        with (
+            patch("psutil.pid_exists", return_value=True),
+            patch("psutil.Process", return_value=_alive_proc_mock()),
+            patch("psutil.net_connections", return_value=[]),
+            patch("subprocess.run", side_effect=results),
+        ):
+            wait_for_ready(cfg, "web", timeout=5, interval=0.01, ready_cmd="mycheck")
+
+    def test_ready_cmd_timeout_when_always_nonzero(self, cfg: Config) -> None:
+        """wait_for_ready with ready_cmd raises WaitTimeout if command never exits 0."""
+        _write_record(cfg)
+        with (
+            patch("psutil.pid_exists", return_value=True),
+            patch("psutil.Process", return_value=_alive_proc_mock()),
+            patch("psutil.net_connections", return_value=[]),
+            patch("subprocess.run", return_value=MagicMock(returncode=1)),
+            pytest.raises(WaitTimeout),
+        ):
+            wait_for_ready(cfg, "web", timeout=0.05, interval=0.01, ready_cmd="false")
 
     def test_net_connections_called_once_per_tick(self, cfg: Config) -> None:
         """wait_for_ready calls net_connections exactly once per polling tick.
