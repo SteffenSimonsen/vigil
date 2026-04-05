@@ -285,6 +285,51 @@ class TestWaitCLI:
             assert "error" in data
             assert "--log-match" in data["error"] or "mutually exclusive" in data["error"]
 
+    def test_ready_cmd_and_port_are_mutually_exclusive(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            cfg = Config(root=Path("."))
+            StateManager(cfg).write(
+                ProcessRecord(name="web", pid=12345, command="...", started_at=1000.0)
+            )
+            result = runner.invoke(
+                main, ["wait", "web", "--ready-cmd", "true", "--port", "8080", "--json"]
+            )
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert "mutually exclusive" in data["error"] or "--ready-cmd" in data["error"]
+
+    def test_ready_cmd_and_http_are_mutually_exclusive(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            cfg = Config(root=Path("."))
+            StateManager(cfg).write(
+                ProcessRecord(name="web", pid=12345, command="...", started_at=1000.0)
+            )
+            result = runner.invoke(
+                main, ["wait", "web", "--ready-cmd", "true", "--http=/health", "--json"]
+            )
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert "mutually exclusive" in data["error"] or "--ready-cmd" in data["error"]
+
+    def test_ready_cmd_and_log_match_are_mutually_exclusive(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            cfg = Config(root=Path("."))
+            StateManager(cfg).write(
+                ProcessRecord(name="web", pid=12345, command="...", started_at=1000.0)
+            )
+            result = runner.invoke(
+                main, ["wait", "web", "--ready-cmd", "true", "--log-match", "ready", "--json"]
+            )
+            assert result.exit_code == 1
+            data = json.loads(result.output)
+            assert "error" in data
+            assert "mutually exclusive" in data["error"] or "--ready-cmd" in data["error"]
+
     def test_port_override(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()

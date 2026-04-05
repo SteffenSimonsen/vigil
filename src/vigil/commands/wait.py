@@ -92,6 +92,30 @@ def cmd_wait(
             click.echo(f"Error: {msg}")
         sys.exit(1)
 
+    if ready_cmd is not None and port_override is not None:
+        msg = "--ready-cmd is mutually exclusive with --port"
+        if as_json:
+            click.echo(json.dumps({"error": msg}))
+        else:
+            click.echo(f"Error: {msg}")
+        sys.exit(1)
+
+    if ready_cmd is not None and http_path is not None:
+        msg = "--ready-cmd is mutually exclusive with --http"
+        if as_json:
+            click.echo(json.dumps({"error": msg}))
+        else:
+            click.echo(f"Error: {msg}")
+        sys.exit(1)
+
+    if ready_cmd is not None and log_match is not None:
+        msg = "--ready-cmd is mutually exclusive with --log-match"
+        if as_json:
+            click.echo(json.dumps({"error": msg}))
+        else:
+            click.echo(f"Error: {msg}")
+        sys.exit(1)
+
     root = require_project(as_json)
     config = Config(root=root)
 

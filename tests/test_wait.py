@@ -272,6 +272,15 @@ class TestWaitForReady:
         ):
             wait_for_ready(cfg, "web", timeout=0.05, interval=0.01, ready_cmd="false")
 
+    def test_ready_cmd_raises_process_died_when_process_dies(self, cfg: Config) -> None:
+        """wait_for_ready with ready_cmd raises ProcessDied if process dies before cmd exits 0."""
+        _write_record(cfg)
+        with (
+            patch("psutil.pid_exists", return_value=False),  # process already dead
+            pytest.raises(ProcessDied),
+        ):
+            wait_for_ready(cfg, "web", timeout=5, interval=0.01, ready_cmd="false")
+
     def test_net_connections_called_once_per_tick(self, cfg: Config) -> None:
         """wait_for_ready calls net_connections exactly once per polling tick.
 
