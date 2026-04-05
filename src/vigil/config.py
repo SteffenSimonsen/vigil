@@ -22,11 +22,6 @@ class Config:
     stop_grace_period: int = 5
 
     @property
-    def scan_port_range(self) -> tuple[int, int]:
-        """Backward-compatible alias for port_range."""
-        return self.port_range
-
-    @property
     def vigil_dir(self) -> Path:
         return self.root / ".vigil"
 
@@ -69,9 +64,6 @@ def load_config(root: Path | None = None) -> Config:
             config.log_retention_lines = int(defaults["log_retention_lines"])
         if "port_range" in defaults:
             r = defaults["port_range"]
-            config.port_range = (int(r[0]), int(r[1]))
-        elif "scan_port_range" in defaults:
-            r = defaults["scan_port_range"]
             config.port_range = (int(r[0]), int(r[1]))
         if "health_check_timeout" in defaults:
             config.health_check_timeout = int(defaults["health_check_timeout"])

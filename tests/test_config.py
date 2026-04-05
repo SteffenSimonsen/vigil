@@ -12,10 +12,6 @@ class TestConfigDefaults:
         config = Config(root=Path("/tmp/fake"))
         assert config.log_retention_lines == 500
 
-    def test_config_has_default_scan_port_range(self) -> None:
-        config = Config(root=Path("/tmp/fake"))
-        assert config.scan_port_range == (3000, 9999)
-
     def test_config_has_default_port_range(self) -> None:
         config = Config(root=Path("/tmp/fake"))
         assert config.port_range == (3000, 9999)
@@ -74,3 +70,9 @@ class TestLoadConfig:
         config = load_config(tmp_path)
         assert config.stop_grace_period == 10
         assert config.log_retention_lines == 500  # default unchanged
+
+    def test_scan_port_range_key_not_recognised_in_toml(self, tmp_path: Path) -> None:
+        (tmp_path / ".vigil").mkdir()
+        (tmp_path / "vigil.toml").write_text("[defaults]\nscan_port_range = [4000, 8000]\n")
+        config = load_config(tmp_path)
+        assert config.port_range == (3000, 9999)  # default unchanged — scan_port_range is ignored
