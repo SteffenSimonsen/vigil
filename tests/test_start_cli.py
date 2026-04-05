@@ -429,6 +429,110 @@ class TestStartCLI:
             )
             assert result.exit_code != 0
 
+    def test_start_auto_port_within_configured_range(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            with patch("psutil.net_connections", return_value=[]):
+                result = runner.invoke(
+                    main,
+                    [
+                        "start",
+                        "web",
+                        "python -c 'import time; time.sleep(30)'",
+                        "--auto-port",
+                        "--json",
+                    ],
+                    catch_exceptions=False,
+                )
+            pid: int | None = None
+            try:
+                assert result.exit_code == 0, result.output
+                data = json.loads(result.output)
+                pid = data["pid"]
+                port = data["port"]
+                # Default port_range is (3000, 9999)
+                assert 3000 <= port <= 9999
+            finally:
+                if pid is not None:
+                    with contextlib.suppress(Exception):
+                        psutil.Process(pid).kill()
+
+    def test_start_auto_port_injects_port_env_var(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            with patch("psutil.net_connections", return_value=[]):
+                result = runner.invoke(
+                    main,
+                    [
+                        "start",
+                        "web",
+                        "python -c 'import os; print(os.environ[\"PORT\"])'",
+                        "--auto-port",
+                        "--json",
+                    ],
+                    catch_exceptions=False,
+                )
+            assert result.exit_code == 0, result.output
+            data = json.loads(result.output)
+            pid: int = data["pid"]
+            port: int = data["port"]
+            with contextlib.suppress(psutil.NoSuchProcess, psutil.TimeoutExpired):
+                psutil.Process(pid).wait(timeout=5)
+            log_path = Path(".vigil") / "logs" / "web.log"
+            assert str(port).encode() in log_path.read_bytes()
+
+    def test_start_auto_port_substitutes_port_in_command(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            with patch("psutil.net_connections", return_value=[]):
+                result = runner.invoke(
+                    main,
+                    [
+                        "start",
+                        "web",
+                        "python -c 'import sys; print(sys.argv[1])' {PORT}",
+                        "--auto-port",
+                        "--json",
+                    ],
+                    catch_exceptions=False,
+                )
+            assert result.exit_code == 0, result.output
+            data = json.loads(result.output)
+            pid: int = data["pid"]
+            port: int = data["port"]
+            with contextlib.suppress(psutil.NoSuchProcess, psutil.TimeoutExpired):
+                psutil.Process(pid).wait(timeout=5)
+            log_path = Path(".vigil") / "logs" / "web.log"
+            assert str(port).encode() in log_path.read_bytes()
+
+    def test_start_auto_port_writes_port_to_statefile(self, runner: CliRunner) -> None:
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            with patch("psutil.net_connections", return_value=[]):
+                result = runner.invoke(
+                    main,
+                    [
+                        "start",
+                        "web",
+                        "python -c 'import time; time.sleep(30)'",
+                        "--auto-port",
+                        "--json",
+                    ],
+                    catch_exceptions=False,
+                )
+            pid: int | None = None
+            try:
+                assert result.exit_code == 0, result.output
+                data = json.loads(result.output)
+                pid = data["pid"]
+                port: int = data["port"]
+                state_raw = json.loads(Path(".vigil/state.json").read_text())
+                assert state_raw["web"]["port"] == port
+            finally:
+                if pid is not None:
+                    with contextlib.suppress(Exception):
+                        psutil.Process(pid).kill()
+
     def test_start_env_flag(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()
