@@ -33,7 +33,7 @@ def cmd_health(endpoint: str, timeout_sec: float | None, as_json: bool) -> None:
         results = check_health(config, endpoint=endpoint, timeout=timeout_sec)
     except StateCorruptedError as e:
         if as_json:
-            json_error(str(e))
+            json_error(str(e), "state_corrupted")
         click.echo(str(e), err=True)
         sys.exit(1)
 

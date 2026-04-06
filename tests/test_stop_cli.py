@@ -44,7 +44,9 @@ class TestStopCLI:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()
             result = runner.invoke(main, ["stop", "ghost", "--json"])
-            assert result.exit_code != 0
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["status"] == "not_running"
 
     def test_stop_all_stops_all_processes(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
@@ -81,7 +83,7 @@ class TestStopCLI:
             Path(".vigil").mkdir()
             start_result = runner.invoke(
                 main,
-                ["start", "crashme", "python -c 'pass'", "--json"],
+                ["start", "crashme", "python -c 'pass'", "--json", "--no-wait"],
                 catch_exceptions=False,
             )
             pid: int = json.loads(start_result.output)["pid"]
@@ -208,7 +210,7 @@ class TestStopCLI:
             )
             dead_result = runner.invoke(
                 main,
-                ["start", "dead", "python -c 'pass'", "--json"],
+                ["start", "dead", "python -c 'pass'", "--json", "--no-wait"],
                 catch_exceptions=False,
             )
             dead_pid: int = json.loads(dead_result.output)["pid"]

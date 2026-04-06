@@ -16,10 +16,10 @@ if TYPE_CHECKING:
     from click.shell_completion import CompletionItem
 
 
-def json_error(message: str, code: int = 1) -> None:
+def json_error(message: str, code: str = "error") -> None:
     """Emit a JSON error to stdout and exit. Used when --json is active."""
     click.echo(json.dumps({"error": message, "code": code}))
-    sys.exit(code)
+    sys.exit(1)
 
 
 def require_project(as_json: bool = False) -> Path:

@@ -25,12 +25,12 @@ def cmd_restart(name: str, as_json: bool) -> None:
         record = make_registry(config).restart(name)
     except StateCorruptedError as e:
         if as_json:
-            json_error(str(e))
+            json_error(str(e), "state_corrupted")
         click.echo(str(e), err=True)
         sys.exit(1)
     except ProcessNotFound as e:
         if as_json:
-            json_error(str(e))
+            json_error(str(e), "process_not_found")
         click.echo(str(e), err=True)
         sys.exit(1)
     except (FileNotFoundError, PermissionError, ValueError) as e:

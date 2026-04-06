@@ -67,7 +67,7 @@ class TestWaitForReady:
             patch("psutil.net_connections", return_value=[]),  # no ports ever open
             pytest.raises(WaitTimeout),
         ):
-            wait_for_ready(cfg, "web", timeout=0.05, interval=0.01)
+            wait_for_ready(cfg, "web", timeout=0.05, interval=0.01, port=8080)
 
     # --- Cycle 3: process dies → ProcessDied raised (exit 2) ---
 
@@ -308,7 +308,7 @@ class TestWaitForReady:
             patch("psutil.Process", return_value=_alive_proc_mock()),
             patch("psutil.net_connections", side_effect=_counting_net_connections),
         ):
-            wait_for_ready(cfg, "web", timeout=5, interval=0.01)
+            wait_for_ready(cfg, "web", timeout=5, interval=0.01, port=8080)
 
         # Port opened immediately → exactly 1 tick → exactly 1 net_connections call
         assert call_counter == 1

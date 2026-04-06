@@ -154,7 +154,7 @@ class TestUp:
 
         assert started == ["db", "api"]
         assert [r["name"] for r in results] == ["db", "api"]
-        assert all(r["status"] == "started" for r in results)
+        assert all(r["status"] == "ready" for r in results)
 
     def test_up_unordered_after_ordered(self, config: Config) -> None:
         """Entries without an order run after those with order, in definition order."""
@@ -225,9 +225,9 @@ class TestUp:
             results = up(config, entries)
 
         statuses = {r["name"]: r["status"] for r in results}
-        assert statuses["db"] == "started"
+        assert statuses["db"] == "ready"
         assert statuses["api"] == "failed"
-        assert statuses["worker"] == "started"
+        assert statuses["worker"] == "ready"
         assert call_count == 3
 
     def test_up_failure_recorded_with_error(self, config: Config) -> None:
@@ -305,11 +305,14 @@ class TestUp:
 class TestDown:
     def test_down_stops_in_reverse_order(self, config: Config) -> None:
         """down() stops processes in reverse startup order."""
+        from vigil.registry import StopResult
+
         entries = _make_entries(("db", 1), ("api", 2), ("worker", 3))
         stopped: list[str] = []
 
-        def fake_stop(cfg: Config, name: str) -> None:
+        def fake_stop(cfg: Config, name: str) -> StopResult:
             stopped.append(name)
+            return StopResult(status="stopped", time_wait_ports=[])
 
         with patch("vigil.vigilfile._stop", side_effect=fake_stop):
             results = down(config, entries)
@@ -320,11 +323,14 @@ class TestDown:
 
     def test_down_only_filter(self, config: Config) -> None:
         """--only stops just the named subset, still in reverse order."""
+        from vigil.registry import StopResult
+
         entries = _make_entries(("db", 1), ("api", 2), ("worker", 3))
         stopped: list[str] = []
 
-        def fake_stop(cfg: Config, name: str) -> None:
+        def fake_stop(cfg: Config, name: str) -> StopResult:
             stopped.append(name)
+            return StopResult(status="stopped", time_wait_ports=[])
 
         with patch("vigil.vigilfile._stop", side_effect=fake_stop):
             results = down(config, entries, only=["db", "api"])

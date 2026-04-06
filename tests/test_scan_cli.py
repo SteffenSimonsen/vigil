@@ -185,7 +185,7 @@ class TestVigilScanBadRange:
         assert result.exit_code == 1
         data = json.loads(result.output)
         assert "error" in data
-        assert data["code"] == 1
+        assert isinstance(data["code"], str)
 
     def test_scan_range_no_hyphen_exits_with_json_error(self) -> None:
         """vigil scan --range 8000 (no hyphen) exits 1 with JSON error."""
@@ -194,7 +194,7 @@ class TestVigilScanBadRange:
         assert result.exit_code == 1
         data = json.loads(result.output)
         assert "error" in data
-        assert data["code"] == 1
+        assert isinstance(data["code"], str)
 
     def test_scan_range_nonnumeric_text_output_exits_with_error(self) -> None:
         """vigil scan --range abc-def (text mode) exits 1."""

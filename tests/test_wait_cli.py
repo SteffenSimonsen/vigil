@@ -69,7 +69,9 @@ class TestWaitCLI:
                 patch("psutil.Process", return_value=_alive_proc_mock()),
                 patch("psutil.net_connections", return_value=[]),  # no port ever
             ):
-                result = runner.invoke(main, ["wait", "web", "--timeout", "0.05", "--json"])
+                result = runner.invoke(
+                    main, ["wait", "web", "--port", "8080", "--timeout", "0.05", "--json"]
+                )
             assert result.exit_code == 1
 
     def test_exits_2_when_process_dies(self, runner: CliRunner) -> None:
@@ -152,7 +154,7 @@ class TestWaitCLI:
             assert result.exit_code == 1
             data = json.loads(result.output)
             assert data["error"] == "No managed process named 'doesnotexist'"
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     # --- http path missing leading slash ---
 

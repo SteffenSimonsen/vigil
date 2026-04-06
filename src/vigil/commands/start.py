@@ -28,6 +28,12 @@ from vigil.state import StateCorruptedError
 @click.option("--env-file", "env_file", default=None, help="Load env vars from a .env file.")
 @click.option("--auto-port", "auto_port", is_flag=True, help="Assign a free port automatically.")
 @click.option("--port", "explicit_port", default=None, type=int, help="Request a specific port.")
+@click.option(
+    "--no-wait",
+    "no_wait",
+    is_flag=True,
+    help="Return immediately without waiting for readiness.",
+)
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 def cmd_start(
     name: str,
@@ -38,6 +44,7 @@ def cmd_start(
     env_file: str | None,
     auto_port: bool,
     explicit_port: int | None,
+    no_wait: bool,
     as_json: bool,
 ) -> None:
     """Start a named process."""
@@ -64,22 +71,22 @@ def cmd_start(
         )
     except StateCorruptedError as e:
         if as_json:
-            json_error(str(e))
+            json_error(str(e), "state_corrupted")
         click.echo(str(e), err=True)
         sys.exit(1)
     except ProcessAlreadyRunning as e:
         if as_json:
-            json_error(str(e))
+            json_error(str(e), "already_running")
         click.echo(str(e), err=True)
         sys.exit(1)
     except ProcessCrashed as e:
         if as_json:
-            json_error(str(e))
+            json_error(str(e), "process_crashed")
         click.echo(str(e), err=True)
         sys.exit(1)
     except PortOccupied as e:
         if as_json:
-            json_error(str(e))
+            json_error(str(e), "port_occupied")
         click.echo(str(e), err=True)
         sys.exit(1)
     except (FileNotFoundError, PermissionError, ValueError) as e:
@@ -88,11 +95,33 @@ def cmd_start(
         click.echo(str(e), err=True)
         sys.exit(1)
 
-    out: dict[str, object] = {"name": record.name, "pid": record.pid, "status": "started"}
+    if no_wait:
+        status = "started"
+    else:
+        from vigil.wait import CrashLooping, ProcessDied, WaitTimeout, wait_for_ready
+
+        try:
+            wait_for_ready(config, name, timeout=30, port=record.port)
+            status = "ready"
+        except (ProcessDied, CrashLooping) as e:
+            if as_json:
+                json_error(str(e), "process_crashed")
+            click.echo(str(e), err=True)
+            sys.exit(1)
+        except WaitTimeout as e:
+            if as_json:
+                json_error(str(e))
+            click.echo(str(e), err=True)
+            sys.exit(1)
+
+    out: dict[str, object] = {"name": record.name, "pid": record.pid, "status": status}
     if record.port is not None:
         out["port"] = record.port
 
     if as_json:
         click.echo(json.dumps(out))
     else:
-        click.echo(f"Started {record.name!r} (pid {record.pid})")
+        if status == "ready":
+            click.echo(f"Started {record.name!r} (pid {record.pid}) — ready")
+        else:
+            click.echo(f"Started {record.name!r} (pid {record.pid})")

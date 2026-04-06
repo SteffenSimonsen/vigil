@@ -104,7 +104,7 @@ class TestStatusCLIJson:
             with patch("psutil.pid_exists", return_value=False):
                 result = runner.invoke(main, ["status", "--json"], catch_exceptions=False)
 
-            assert result.exit_code == 0
+            assert result.exit_code == 2
             data = json.loads(result.output)
             assert len(data["managed"]) == 1
             entry = data["managed"][0]
@@ -176,7 +176,7 @@ class TestStatusCLIText:
             with patch("psutil.pid_exists", return_value=False):
                 result = runner.invoke(main, ["status"], catch_exceptions=False)
 
-            assert result.exit_code == 0
+            assert result.exit_code == 2
             assert "web" in result.output
             assert "crashed" in result.output
 
@@ -549,7 +549,7 @@ class TestDegradedStatus:
             ):
                 result = runner.invoke(main, ["status", "--json"], catch_exceptions=False)
 
-            assert result.exit_code == 0
+            assert result.exit_code == 2
             data = json.loads(result.output)
             entries = {e["name"]: e for e in data["managed"]}
             assert entries["backend"]["status"] == "degraded"

@@ -143,12 +143,12 @@ def cmd_wait(
         sys.exit(2)
     except StateCorruptedError as e:
         if as_json:
-            json_error(str(e))
+            json_error(str(e), "state_corrupted")
         click.echo(str(e), err=True)
         sys.exit(1)
     except WaitProcessNotFound as e:
         if as_json:
-            click.echo(json.dumps({"error": str(e), "code": 1}))
+            click.echo(json.dumps({"error": str(e), "code": "process_not_found"}))
         else:
             click.echo(str(e), err=True)
         sys.exit(1)

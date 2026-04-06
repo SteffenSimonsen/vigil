@@ -40,7 +40,7 @@ def cmd_init(process_specs: tuple[str, ...], force: bool, as_json: bool) -> None
     try:
         init_project(root, processes, force=force)
     except VigilfileExistsError as exc:
-        click.echo(json.dumps({"error": str(exc), "code": 1}, indent=2))
+        click.echo(json.dumps({"error": str(exc), "code": "error"}, indent=2))
         sys.exit(1)
 
     if as_json:

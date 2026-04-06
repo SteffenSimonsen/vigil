@@ -41,6 +41,10 @@ class PortMismatch(Exception):
     """Raised when a process is alive but listening on a different port than assigned."""
 
 
+_PORTLESS_GRACE_PERIOD = 2.0
+"""Default seconds to confirm liveness for portless processes (no readiness strategy)."""
+
+
 def wait_for_ready(
     config: Config,
     name: str,
@@ -60,10 +64,17 @@ def wait_for_ready(
        port; otherwise wait for any port the process is listening on.
     3. If *http_path* is set, also require a successful HTTP response.
 
+    For portless processes (no port, http_path, log_match, or ready_cmd),
+    applies a grace period of _PORTLESS_GRACE_PERIOD seconds: if the process
+    stays alive for the full grace period, it is considered ready.
+
     Raises WaitTimeout if *timeout* seconds elapse without readiness.
     Raises ProcessDied if the process dies while polling.
     """
-    deadline = time.monotonic() + timeout
+    start = time.monotonic()
+    deadline = start + timeout
+    portless = port is None and http_path is None and log_match is None and ready_cmd is None
+    grace_deadline = start + min(timeout, _PORTLESS_GRACE_PERIOD) if portless else None
     reg = make_registry(config)
 
     # For log_match: open log file once, seek to EOF so pre-existing lines are skipped.
@@ -139,6 +150,15 @@ def wait_for_ready(
                         f"Process {name!r} did not become ready within {timeout:.0f}s."
                     )
                 time.sleep(interval)
+                continue
+
+            # Portless grace period: no readiness strategy configured.
+            # Consider ready once the process has survived the grace period.
+            if portless:
+                assert grace_deadline is not None
+                if time.monotonic() >= grace_deadline:
+                    return  # process survived the grace period
+                time.sleep(min(interval, grace_deadline - time.monotonic()))
                 continue
 
             # Determine which port to check

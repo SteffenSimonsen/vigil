@@ -26,17 +26,19 @@ def cmd_remove(name: str, force: bool, as_json: bool) -> None:
         make_registry(config).remove(name, force=force)
     except StateCorruptedError as e:
         if as_json:
-            json_error(str(e))
+            json_error(str(e), "state_corrupted")
         click.echo(str(e), err=True)
         sys.exit(1)
-    except ProcessNotFound as e:
+    except ProcessNotFound:
+        # Idempotent: not in registry is a success
         if as_json:
-            json_error(str(e))
-        click.echo(str(e), err=True)
-        sys.exit(1)
+            click.echo(json.dumps({"name": name, "status": "not_found"}))
+        else:
+            click.echo(f"{name!r} not found in registry")
+        return
     except ProcessAlreadyRunning as e:
         if as_json:
-            json_error(str(e))
+            json_error(str(e), "already_running")
         click.echo(str(e), err=True)
         sys.exit(1)
 

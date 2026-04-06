@@ -23,7 +23,7 @@ def cmd_orphans(as_json: bool) -> None:
         records = StateManager(config).read_all()
     except StateCorruptedError as e:
         if as_json:
-            json_error(str(e))
+            json_error(str(e), "state_corrupted")
         click.echo(str(e), err=True)
         raise SystemExit(1) from None
 

@@ -189,6 +189,8 @@ class DefaultLivenessChecker:
             return True
         try:
             proc = psutil.Process(pid)
+            if proc.status() == psutil.STATUS_ZOMBIE:
+                return False
             return abs(proc.create_time() - started_at) <= _START_TIME_TOLERANCE
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             return False

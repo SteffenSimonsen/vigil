@@ -99,7 +99,7 @@ class TestInitExistingVigilfile:
             data = json.loads(result.output)
             assert "already exists" in data["error"]
             assert "--force" in data["error"]
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_force_flag_overwrites_existing_vigilfile(
         self, runner: CliRunner, tmp_path: Path
@@ -130,7 +130,7 @@ class TestInitBadProcessSpec:
             assert result.exit_code == 1
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
             assert "name,command" in data["error"]
 
     def test_spec_with_no_command_does_not_write_vigilfile(
@@ -149,7 +149,7 @@ class TestInitBadProcessSpec:
             assert result.exit_code == 1
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_nonnumeric_port_text_output_exits_with_error(
         self, runner: CliRunner, tmp_path: Path

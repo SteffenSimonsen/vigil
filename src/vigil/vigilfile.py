@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from vigil.config import Config
-from vigil.registry import ProcessAlreadyRunning, ProcessNotFound, make_registry
+from vigil.registry import ProcessAlreadyRunning, ProcessNotFound, StopResult, make_registry
 from vigil.state import ProcessRecord
 from vigil.wait import WaitTimeout, wait_for_ready
 
@@ -158,8 +158,8 @@ def _wait(
     wait_for_ready(config, name, timeout=timeout, port=port, http_path=http_path)
 
 
-def _stop(config: Config, name: str) -> None:
-    make_registry(config).stop(name)
+def _stop(config: Config, name: str) -> StopResult:
+    return make_registry(config).stop(name)
 
 
 def up(
@@ -168,6 +168,7 @@ def up(
     *,
     only: list[str] | None = None,
     force: bool = False,
+    no_wait: bool = False,
 ) -> list[dict[str, Any]]:
     """Start Vigilfile processes in order.
 
@@ -209,6 +210,15 @@ def up(
             failed.add(entry.name)
             continue
 
+        # Persist depends_on so status can compute degraded state
+        if entry.depends_on:
+            with contextlib.suppress(KeyError):
+                make_registry(config).set_depends_on(entry.name, entry.depends_on)
+
+        if no_wait:
+            results.append({"name": entry.name, "status": "started", "pid": rec.pid, "error": None})
+            continue
+
         # Wait for readiness
         try:
             _wait(
@@ -225,12 +235,7 @@ def up(
             failed.add(entry.name)
             continue
 
-        # Persist depends_on so status can compute degraded state
-        if entry.depends_on:
-            with contextlib.suppress(KeyError):
-                make_registry(config).set_depends_on(entry.name, entry.depends_on)
-
-        results.append({"name": entry.name, "status": "started", "pid": rec.pid, "error": None})
+        results.append({"name": entry.name, "status": "ready", "pid": rec.pid, "error": None})
 
     return results
 
@@ -250,9 +255,18 @@ def down(
 
     for entry in reversed(ordered):
         try:
-            _stop(config, entry.name)
-            results.append({"name": entry.name, "status": "stopped", "error": None})
+            stop_result = _stop(config, entry.name)
+            results.append(
+                {
+                    "name": entry.name,
+                    "status": "stopped",
+                    "error": None,
+                    "time_wait_ports": stop_result["time_wait_ports"],
+                }
+            )
         except ProcessNotFound:
-            results.append({"name": entry.name, "status": "not_running", "error": None})
+            results.append(
+                {"name": entry.name, "status": "not_running", "error": None, "time_wait_ports": []}
+            )
 
     return results

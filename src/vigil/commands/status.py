@@ -12,8 +12,11 @@ import click
 from vigil.commands._shared import json_error, require_project
 from vigil.config import Config
 from vigil.docker import lookup as docker_lookup
+from vigil.logs import LogNotFound, read_log
 from vigil.registry import make_registry
 from vigil.state import StateCorruptedError
+
+_BAD_STATUSES = {"crashed", "crash_looping", "degraded"}
 
 
 def _format_session(session_id: str | None, current_session: str | None) -> str:
@@ -27,9 +30,10 @@ def _format_session(session_id: str | None, current_session: str | None) -> str:
 
 
 @click.command("status")
+@click.argument("name", required=False, default=None)
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
-def cmd_status(as_json: bool) -> None:
-    """Show status of all managed processes."""
+def cmd_status(name: str | None, as_json: bool) -> None:
+    """Show status of all managed processes (or a single named process)."""
     root = require_project(as_json)
     config = Config(root=root)
 
@@ -40,9 +44,19 @@ def cmd_status(as_json: bool) -> None:
         observations = reg.observe_all(records=records)
     except StateCorruptedError as e:
         if as_json:
-            json_error(str(e))
+            json_error(str(e), "state_corrupted")
         click.echo(str(e), err=True)
         sys.exit(1)
+
+    # Single-name filter
+    if name is not None:
+        matched = [r for r in records if r.name == name]
+        if not matched:
+            if as_json:
+                json_error(f"No managed process named {name!r}.", "process_not_found")
+            click.echo(f"No managed process named {name!r}.", err=True)
+            sys.exit(1)
+        records = matched
 
     alive_names = {r.name for r in records if r.alive}
 
@@ -94,6 +108,13 @@ def cmd_status(as_json: bool) -> None:
                     }
                 )
         else:
+            # Crashed process: include log_tail
+            try:
+                log_lines = read_log(config, record.name, tail=20)
+                log_tail: list[str] | None = log_lines
+            except LogNotFound:
+                log_tail = None
+
             managed.append(
                 {
                     "name": record.name,
@@ -107,11 +128,16 @@ def cmd_status(as_json: bool) -> None:
                     "env_file": record.env_file,
                     "env_overrides": {k: "[set]" for k in record.env_keys},
                     "session_id": record.session_id,
+                    "log_tail": log_tail,
                 }
             )
 
+    any_bad = any(entry["status"] in _BAD_STATUSES for entry in managed)
+
     if as_json:
         click.echo(json.dumps({"managed": managed}, indent=2))
+        if any_bad:
+            sys.exit(2)
         return
 
     if not managed:
@@ -138,3 +164,6 @@ def cmd_status(as_json: bool) -> None:
             click.echo(
                 f"  {entry['name']:<12} \u2716 crashed  ({entry['command']}){session_suffix}"
             )
+
+    if any_bad:
+        sys.exit(2)

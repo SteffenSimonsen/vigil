@@ -25,7 +25,7 @@ class TestCorruptedStateJson:
             assert result.exit_code != 0
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_status_missing_fields_emits_clean_json(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
@@ -35,7 +35,7 @@ class TestCorruptedStateJson:
             assert result.exit_code != 0
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_status_permission_error_emits_clean_json(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
@@ -48,7 +48,7 @@ class TestCorruptedStateJson:
                 assert result.exit_code != 0
                 data = json.loads(result.output)
                 assert "error" in data
-                assert data["code"] == 1
+                assert isinstance(data["code"], str)
             finally:
                 state_file.chmod(0o644)
 
@@ -62,7 +62,7 @@ class TestCorruptedStateStart:
             assert result.exit_code != 0
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
 
 class TestCorruptedStateStop:
@@ -74,4 +74,4 @@ class TestCorruptedStateStop:
             assert result.exit_code != 0
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)

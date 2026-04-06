@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 
 import click
 
@@ -13,13 +14,36 @@ from vigil.config import Config
 from vigil.registry import ProcessNotFound, make_registry
 from vigil.state import StateCorruptedError, StateManager
 
+_TIME_WAIT_POLL_INTERVAL = 0.5
+_TIME_WAIT_TIMEOUT = 65.0
+
+
+def wait_for_time_wait_clear(ports: list[int]) -> None:
+    """Poll until all given ports leave TIME_WAIT state (or timeout)."""
+    from vigil.scanner import port_socket_state
+
+    deadline = time.monotonic() + _TIME_WAIT_TIMEOUT
+    remaining: list[int] = list(ports)
+    while remaining and time.monotonic() < deadline:
+        remaining = [p for p in remaining if port_socket_state(p) == "time_wait"]
+        if remaining:
+            time.sleep(_TIME_WAIT_POLL_INTERVAL)
+
 
 @click.command("stop")
 @click.argument("name", required=False, default=None, shell_complete=complete_process_names)
 @click.option("--all", "stop_all_flag", is_flag=True, help="Stop all managed processes.")
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
 @click.option("--force", is_flag=True, help="Suppress cross-session ownership warning.")
-def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool, force: bool) -> None:
+@click.option(
+    "--no-wait",
+    "no_wait",
+    is_flag=True,
+    help="Return immediately without waiting for TIME_WAIT to clear.",
+)
+def cmd_stop(
+    name: str | None, stop_all_flag: bool, as_json: bool, force: bool, no_wait: bool
+) -> None:
     """Stop a managed process (or all processes with --all)."""
     root = require_project(as_json)
     config = Config(root=root)
@@ -29,9 +53,15 @@ def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool, force: bool) 
             results = make_registry(config).stop_all()
         except StateCorruptedError as e:
             if as_json:
-                json_error(str(e))
+                json_error(str(e), "state_corrupted")
             click.echo(str(e), err=True)
             sys.exit(1)
+
+        if not no_wait:
+            all_tw_ports = [p for r in results for p in r["time_wait_ports"]]
+            if all_tw_ports:
+                wait_for_time_wait_clear(all_tw_ports)
+
         if as_json:
             click.echo(json.dumps({"processes": list(results)}))
         else:
@@ -74,14 +104,19 @@ def cmd_stop(name: str | None, stop_all_flag: bool, as_json: bool, force: bool) 
         result = make_registry(config).stop(name)
     except StateCorruptedError as e:
         if as_json:
-            json_error(str(e))
+            json_error(str(e), "state_corrupted")
         click.echo(str(e), err=True)
         sys.exit(1)
-    except ProcessNotFound as e:
+    except ProcessNotFound:
+        # Idempotent: not running is a success
         if as_json:
-            json_error(str(e))
-        click.echo(str(e), err=True)
-        sys.exit(1)
+            click.echo(json.dumps({"name": name, "status": "not_running"}))
+        else:
+            click.echo(f"{name!r} is not running")
+        return
+
+    if not no_wait and result["time_wait_ports"]:
+        wait_for_time_wait_clear(result["time_wait_ports"])
 
     if as_json:
         click.echo(

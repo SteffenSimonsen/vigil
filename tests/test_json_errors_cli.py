@@ -21,10 +21,9 @@ class TestJsonErrorsStop:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()
             result = runner.invoke(main, ["stop", "ghost", "--json"])
-            assert result.exit_code != 0
+            assert result.exit_code == 0
             data = json.loads(result.output)
-            assert "error" in data
-            assert data["code"] == 1
+            assert data["status"] == "not_running"
 
 
 class TestJsonErrorsStart:
@@ -49,7 +48,7 @@ class TestJsonErrorsStart:
                 assert result.exit_code != 0
                 data = json.loads(result.output)
                 assert "error" in data
-                assert data["code"] == 1
+                assert isinstance(data["code"], str)
             finally:
                 with contextlib.suppress(Exception):
                     psutil.Process(pid).kill()
@@ -63,7 +62,7 @@ class TestJsonErrorsRestart:
             assert result.exit_code != 0
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
 
 class TestJsonErrorsRemove:
@@ -71,10 +70,9 @@ class TestJsonErrorsRemove:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()
             result = runner.invoke(main, ["remove", "ghost", "--json"])
-            assert result.exit_code != 0
+            assert result.exit_code == 0
             data = json.loads(result.output)
-            assert "error" in data
-            assert data["code"] == 1
+            assert data["status"] == "not_found"
 
 
 class TestJsonErrorsLogs:
@@ -85,7 +83,7 @@ class TestJsonErrorsLogs:
             assert result.exit_code != 0
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
 
 class TestJsonErrorsOpen:
@@ -96,7 +94,7 @@ class TestJsonErrorsOpen:
             assert result.exit_code != 0
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
 
 class TestJsonErrorsMissingProject:
@@ -109,7 +107,7 @@ class TestJsonErrorsMissingProject:
         assert result.exit_code != 0
         data = json.loads(result.output)
         assert "error" in data
-        assert data["code"] == 1
+        assert isinstance(data["code"], str)
 
     def test_status_json_missing_project(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():

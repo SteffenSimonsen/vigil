@@ -25,12 +25,12 @@ def cmd_open(target: str, as_json: bool) -> None:
         url = resolve_url(config, target)
     except StateCorruptedError as e:
         if as_json:
-            json_error(str(e))
+            json_error(str(e), "state_corrupted")
         click.echo(str(e), err=True)
         sys.exit(1)
     except UnknownProcess as e:
         if as_json:
-            json_error(str(e))
+            json_error(str(e), "process_not_found")
         click.echo(str(e), err=True)
         sys.exit(1)
     except NoPortFound as e:

@@ -98,7 +98,7 @@ class TestRestartOSErrors:
             assert result.exit_code == 1
             data = _json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
 
 class TestRemoveCLI:
@@ -107,7 +107,7 @@ class TestRemoveCLI:
             Path(".vigil").mkdir()
             start_result = runner.invoke(
                 main,
-                ["start", "web", "python -c 'pass'", "--json"],
+                ["start", "web", "python -c 'pass'", "--json", "--no-wait"],
                 catch_exceptions=False,
             )
             pid: int = json.loads(start_result.output)["pid"]
@@ -164,4 +164,6 @@ class TestRemoveCLI:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()
             result = runner.invoke(main, ["remove", "ghost", "--json"])
-            assert result.exit_code != 0
+            assert result.exit_code == 0
+            data = json.loads(result.output)
+            assert data["status"] == "not_found"

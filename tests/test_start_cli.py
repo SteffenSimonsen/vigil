@@ -34,7 +34,7 @@ class TestStartCLI:
                 data = json.loads(result.output)
                 pid = data["pid"]
                 assert data["name"] == "web"
-                assert data["status"] == "started"
+                assert data["status"] == "ready"
                 assert isinstance(pid, int)
             finally:
                 if pid is not None:
@@ -111,7 +111,7 @@ class TestStartCLI:
                 new_pid: int = data2["pid"]
                 try:
                     assert new_pid != old_pid
-                    assert data2["status"] == "started"
+                    assert data2["status"] == "ready"
                 finally:
                     with contextlib.suppress(Exception):
                         psutil.Process(new_pid).kill()
@@ -129,7 +129,7 @@ class TestStartCLI:
             assert result.exit_code == 1
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_start_empty_command_exits_with_json_error(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
@@ -141,7 +141,7 @@ class TestStartCLI:
             assert result.exit_code == 1
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_start_whitespace_command_exits_with_json_error(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
@@ -153,7 +153,7 @@ class TestStartCLI:
             assert result.exit_code == 1
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_start_unclosed_quote_exits_with_json_error(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
@@ -165,7 +165,7 @@ class TestStartCLI:
             assert result.exit_code == 1
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_start_permission_error_exits_with_json_error(
         self, runner: CliRunner, tmp_path: Path
@@ -183,7 +183,7 @@ class TestStartCLI:
             assert result.exit_code == 1
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_start_name_with_forward_slash_exits_with_json_error(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
@@ -195,7 +195,7 @@ class TestStartCLI:
             assert result.exit_code == 1
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_start_name_with_backslash_exits_with_json_error(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
@@ -207,7 +207,7 @@ class TestStartCLI:
             assert result.exit_code == 1
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_start_name_with_dotdot_exits_with_json_error(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
@@ -219,7 +219,7 @@ class TestStartCLI:
             assert result.exit_code == 1
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_start_name_dotdot_alone_exits_with_json_error(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
@@ -231,7 +231,7 @@ class TestStartCLI:
             assert result.exit_code == 1
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_start_empty_name_exits_with_json_error(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
@@ -243,7 +243,7 @@ class TestStartCLI:
             assert result.exit_code == 1
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_start_name_longer_than_200_chars_exits_with_json_error(
         self, runner: CliRunner
@@ -258,7 +258,7 @@ class TestStartCLI:
             assert result.exit_code == 1
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_start_name_exactly_200_chars_is_valid(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
@@ -310,6 +310,7 @@ class TestStartCLI:
                     "web",
                     "python -c 'import os; print(os.environ[\"MY_SECRET\"])'",
                     "--json",
+                    "--no-wait",
                     "--env-file",
                     ".env.test",
                 ],
@@ -369,6 +370,7 @@ class TestStartCLI:
                         "web",
                         "python -c 'import time; time.sleep(30)'",
                         "--auto-port",
+                        "--no-wait",
                         "--json",
                     ],
                     catch_exceptions=False,
@@ -397,6 +399,7 @@ class TestStartCLI:
                         "python -c 'import time; time.sleep(30)'",
                         "--port",
                         "7777",
+                        "--no-wait",
                         "--json",
                     ],
                     catch_exceptions=False,
@@ -456,6 +459,7 @@ class TestStartCLI:
                         "python -c 'import time; time.sleep(30)'",
                         "--port",
                         "80",
+                        "--no-wait",
                         "--json",
                     ],
                     catch_exceptions=False,
@@ -483,6 +487,7 @@ class TestStartCLI:
                         "python -c 'import os; print(os.environ[\"PORT\"])'",
                         "--port",
                         "7654",
+                        "--no-wait",
                         "--json",
                     ],
                     catch_exceptions=False,
@@ -507,6 +512,7 @@ class TestStartCLI:
                         "python -c 'import sys; print(sys.argv[1])' {PORT}",
                         "--port",
                         "7654",
+                        "--no-wait",
                         "--json",
                     ],
                     catch_exceptions=False,
@@ -531,6 +537,7 @@ class TestStartCLI:
                         "python -c 'import time; time.sleep(30)'",
                         "--port",
                         "7654",
+                        "--no-wait",
                         "--json",
                     ],
                     catch_exceptions=False,
@@ -575,6 +582,7 @@ class TestStartCLI:
                         "web",
                         "python -c 'import time; time.sleep(30)'",
                         "--auto-port",
+                        "--no-wait",
                         "--json",
                     ],
                     catch_exceptions=False,
@@ -603,6 +611,7 @@ class TestStartCLI:
                         "web",
                         "python -c 'import os; print(os.environ[\"PORT\"])'",
                         "--auto-port",
+                        "--no-wait",
                         "--json",
                     ],
                     catch_exceptions=False,
@@ -627,6 +636,7 @@ class TestStartCLI:
                         "web",
                         "python -c 'import sys; print(sys.argv[1])' {PORT}",
                         "--auto-port",
+                        "--no-wait",
                         "--json",
                     ],
                     catch_exceptions=False,
@@ -651,6 +661,7 @@ class TestStartCLI:
                         "web",
                         "python -c 'import time; time.sleep(30)'",
                         "--auto-port",
+                        "--no-wait",
                         "--json",
                     ],
                     catch_exceptions=False,
@@ -678,6 +689,7 @@ class TestStartCLI:
                     "web",
                     "python -c 'import os; print(os.environ[\"MY_VAR\"])'",
                     "--json",
+                    "--no-wait",
                     "--env",
                     "MY_VAR=hello",
                 ],

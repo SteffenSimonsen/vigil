@@ -25,7 +25,7 @@ def cmd_free(port: int, as_json: bool) -> None:
         result = free_port(config, port)
     except StateCorruptedError as e:
         if as_json:
-            json_error(str(e))
+            json_error(str(e), "state_corrupted")
         click.echo(str(e), err=True)
         sys.exit(1)
 

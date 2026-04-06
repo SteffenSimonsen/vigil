@@ -159,7 +159,7 @@ class TestUpCLI:
             assert result.exit_code == 1
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_up_invalid_toml_json_outputs_json_error(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
@@ -169,7 +169,7 @@ class TestUpCLI:
             assert result.exit_code == 1
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_up_no_vigilfile_plain_text_shows_human_error(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
@@ -204,7 +204,7 @@ class TestUpCLI:
             data = json.loads(result.output)
             statuses = {p["name"]: p["status"] for p in data["processes"]}
             assert statuses["db"] == "failed"
-            assert statuses["api"] == "started"
+            assert statuses["api"] == "ready"
 
     def test_up_all_failures_exits_two(self, runner: CliRunner) -> None:
         """All processes failing causes exit 2 (partial success)."""
@@ -233,14 +233,17 @@ class TestUpCLI:
 
 class TestDownCLI:
     def test_down_json_output(self, runner: CliRunner) -> None:
+        from vigil.registry import StopResult
+
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()
             _write_vigilfile(Path("."), _two_process_vigilfile())
 
             stopped: list[str] = []
 
-            def fake_stop(cfg: object, name: str) -> None:
+            def fake_stop(cfg: object, name: str) -> StopResult:
                 stopped.append(name)
+                return StopResult(status="stopped", time_wait_ports=[])
 
             with patch("vigil.vigilfile._stop", side_effect=fake_stop):
                 result = runner.invoke(main, ["down", "--json"], catch_exceptions=False)
@@ -254,12 +257,14 @@ class TestDownCLI:
             assert data["processes"][1]["name"] == "db"
 
     def test_down_text_output(self, runner: CliRunner) -> None:
+        from vigil.registry import StopResult
+
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()
             _write_vigilfile(Path("."), _two_process_vigilfile())
 
-            def fake_stop(cfg: object, name: str) -> None:
-                pass
+            def fake_stop(cfg: object, name: str) -> StopResult:
+                return StopResult(status="stopped", time_wait_ports=[])
 
             with patch("vigil.vigilfile._stop", side_effect=fake_stop):
                 result = runner.invoke(main, ["down"], catch_exceptions=False)
@@ -269,14 +274,17 @@ class TestDownCLI:
             assert "api" in result.output
 
     def test_down_only_flag(self, runner: CliRunner) -> None:
+        from vigil.registry import StopResult
+
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()
             _write_vigilfile(Path("."), _two_process_vigilfile())
 
             stopped: list[str] = []
 
-            def fake_stop(cfg: object, name: str) -> None:
+            def fake_stop(cfg: object, name: str) -> StopResult:
                 stopped.append(name)
+                return StopResult(status="stopped", time_wait_ports=[])
 
             with patch("vigil.vigilfile._stop", side_effect=fake_stop):
                 result = runner.invoke(
@@ -299,7 +307,7 @@ class TestDownCLI:
             assert result.exit_code == 1
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_down_invalid_toml_json_outputs_json_error(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
@@ -309,7 +317,7 @@ class TestDownCLI:
             assert result.exit_code == 1
             data = json.loads(result.output)
             assert "error" in data
-            assert data["code"] == 1
+            assert isinstance(data["code"], str)
 
     def test_down_no_vigilfile_plain_text_shows_human_error(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():

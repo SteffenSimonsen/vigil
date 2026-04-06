@@ -24,8 +24,14 @@ from vigil.vigilfile import up as vigilfile_up
     help="Comma-separated subset of processes to start.",
 )
 @click.option("--force", is_flag=True, help="Restart processes even if already running.")
+@click.option(
+    "--no-wait",
+    "no_wait",
+    is_flag=True,
+    help="Return immediately after spawning without waiting for readiness.",
+)
 @click.option("--json", "as_json", is_flag=True, help="Output JSON.")
-def cmd_up(only_names: str | None, force: bool, as_json: bool) -> None:
+def cmd_up(only_names: str | None, force: bool, no_wait: bool, as_json: bool) -> None:
     """Start all Vigilfile processes in order."""
     root = require_project(as_json)
     config = Config(root=root)
@@ -40,10 +46,10 @@ def cmd_up(only_names: str | None, force: bool, as_json: bool) -> None:
 
     only: list[str] | None = [n.strip() for n in only_names.split(",")] if only_names else None
     try:
-        results = vigilfile_up(config, entries, only=only, force=force)
+        results = vigilfile_up(config, entries, only=only, force=force, no_wait=no_wait)
     except StateCorruptedError as e:
         if as_json:
-            json_error(str(e))
+            json_error(str(e), "state_corrupted")
         click.echo(str(e), err=True)
         sys.exit(1)
 
@@ -58,8 +64,8 @@ def cmd_up(only_names: str | None, force: bool, as_json: bool) -> None:
     for r in results:
         status = r["status"]
         name = r["name"]
-        if status == "started":
-            click.echo(f"  {name}: started (pid {r['pid']})")
+        if status in ("started", "ready"):
+            click.echo(f"  {name}: {status} (pid {r['pid']})")
         elif status == "skipped":
             click.echo(f"  {name}: already running, skipped")
         else:
