@@ -168,3 +168,13 @@ class TestJsonErrorsMissingProject:
         with runner.isolated_filesystem():
             result = runner.invoke(main, ["down", "--json"])
             self._assert_json_error(result)
+
+
+class TestJsonErrorsNext:
+    def test_next_error_returns_string_code(self, runner: CliRunner) -> None:
+        """vigil next --json with an out-of-range port returns string code, not numeric 1."""
+        result = runner.invoke(main, ["next", "99999", "--json"])
+        assert result.exit_code != 0
+        data = json.loads(result.output)
+        assert "error" in data
+        assert isinstance(data["code"], str)

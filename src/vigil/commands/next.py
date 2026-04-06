@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import sys
 
 import click
 
+from vigil.commands._shared import json_error
 from vigil.scanner import next_free_port
 
 
@@ -19,10 +21,10 @@ def cmd_next(start: int, count: int, as_json: bool) -> None:
         result = next_free_port(start, count=count)
     except ValueError as exc:
         if as_json:
-            click.echo(json.dumps({"error": str(exc), "code": 1}))
+            json_error(str(exc))
         else:
             click.echo(f"Error: {exc}", err=True)
-        raise SystemExit(1) from exc
+        sys.exit(1)
 
     if as_json:
         if count == 1:
