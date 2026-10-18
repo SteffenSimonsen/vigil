@@ -34,9 +34,6 @@ class ProcessRecord:
     port: int | None = None
     cwd: str | None = None
     alive: bool = False  # populated on read, not persisted
-    crash_count: int = 0
-    last_crash_at: float | None = None
-    circuit_open: bool = False
     env_file: str | None = None
     env_keys: list[str] = field(default_factory=lambda: [])
     session_id: str | None = None
@@ -50,9 +47,6 @@ class ProcessRecord:
             "started_at": self.started_at,
             "port": self.port,
             "cwd": self.cwd,
-            "crash_count": self.crash_count,
-            "last_crash_at": self.last_crash_at,
-            "circuit_open": self.circuit_open,
             "env_file": self.env_file,
             "env_keys": self.env_keys,
             "session_id": self.session_id,
@@ -68,9 +62,6 @@ class ProcessRecord:
             started_at=data.get("started_at"),
             port=data.get("port"),
             cwd=data.get("cwd"),
-            crash_count=data.get("crash_count", 0),
-            last_crash_at=data.get("last_crash_at"),
-            circuit_open=bool(data.get("circuit_open", False)),
             env_file=data.get("env_file"),
             env_keys=data.get("env_keys", []),
             session_id=data.get("session_id"),
@@ -103,6 +94,35 @@ class StateManager:
 
     def __init__(self, config: Config) -> None:
         self.config = config
+
+    @contextlib.contextmanager
+    def lifecycle_lock(self) -> Generator[None, None, None]:
+        """Serialize registry lifecycle operations for this project."""
+        lock_path = self.config.vigil_dir / "lifecycle.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        if sys.platform == "win32":
+            import msvcrt
+
+            with open(lock_path, "a+b") as lock_file:
+                if lock_file.tell() == 0:
+                    lock_file.write(b"\0")
+                    lock_file.flush()
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+                try:
+                    yield
+                finally:
+                    lock_file.seek(0)
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            with open(lock_path, "a+b") as lock_file:
+                fcntl.flock(lock_file, fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(lock_file, fcntl.LOCK_UN)
 
     @contextlib.contextmanager
     def _exclusive_lock(self) -> Generator[None, None, None]:

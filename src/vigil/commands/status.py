@@ -16,7 +16,7 @@ from vigil.logs import LogNotFound, read_log
 from vigil.registry import make_registry
 from vigil.state import StateCorruptedError
 
-_BAD_STATUSES = {"crashed", "crash_looping", "degraded"}
+_BAD_STATUSES = {"exited", "degraded"}
 
 
 def _format_session(session_id: str | None, current_session: str | None) -> str:
@@ -41,7 +41,7 @@ def cmd_status(name: str | None, as_json: bool) -> None:
 
     try:
         records = reg.all()
-        observations = reg.observe_all(records=records)
+        ports_by_name = reg.ports_by_process(records=records)
     except StateCorruptedError as e:
         if as_json:
             json_error(str(e), "state_corrupted")
@@ -62,53 +62,29 @@ def cmd_status(name: str | None, as_json: bool) -> None:
 
     managed: list[dict[str, Any]] = []
     for record in records:
-        obs = observations.get(record.name)
-        circuit_open = obs["circuit_open"] if obs else record.circuit_open
-        crash_count = obs["crash_count"] if obs else record.crash_count
-        last_crash_at = obs["last_crash_at"] if obs else record.last_crash_at
-
         if record.alive:
-            if circuit_open:
-                managed.append(
-                    {
-                        "name": record.name,
-                        "command": record.command,
-                        "pid": record.pid,
-                        "alive": True,
-                        "status": "crash_looping",
-                        "crash_count": crash_count,
-                        "last_crash_at": last_crash_at,
-                        "ports": [],
-                        "docker": None,
-                        "message": f"Process exited {crash_count} times. "
-                        f"Use 'vigil logs {record.name}' to investigate.",
-                    }
-                )
-            else:
-                entry_ports = obs["ports"] if obs else []
-                dead_deps = [d for d in record.depends_on if d not in alive_names]
-                status = "degraded" if dead_deps else "alive"
-                dep_status = {
-                    d: ("alive" if d in alive_names else "dead") for d in record.depends_on
+            entry_ports = ports_by_name.get(record.name, [])
+            dead_deps = [d for d in record.depends_on if d not in alive_names]
+            status = "degraded" if dead_deps else "alive"
+            dep_status = {d: ("alive" if d in alive_names else "dead") for d in record.depends_on}
+            managed.append(
+                {
+                    "name": record.name,
+                    "command": record.command,
+                    "pid": record.pid,
+                    "alive": True,
+                    "status": status,
+                    "ports": entry_ports,
+                    "docker": docker_lookup(entry_ports),
+                    "env_file": record.env_file,
+                    "env_overrides": {k: "[set]" for k in record.env_keys},
+                    "session_id": record.session_id,
+                    "depends_on": record.depends_on,
+                    "dependency_status": dep_status,
                 }
-                managed.append(
-                    {
-                        "name": record.name,
-                        "command": record.command,
-                        "pid": record.pid,
-                        "alive": True,
-                        "status": status,
-                        "ports": entry_ports,
-                        "docker": docker_lookup(entry_ports),
-                        "env_file": record.env_file,
-                        "env_overrides": {k: "[set]" for k in record.env_keys},
-                        "session_id": record.session_id,
-                        "depends_on": record.depends_on,
-                        "dependency_status": dep_status,
-                    }
-                )
+            )
         else:
-            # Crashed process: include log_tail
+            # Exited process: include log_tail. Exit status is unavailable without a supervisor.
             try:
                 log_lines = read_log(config, record.name, tail=20)
                 log_tail: list[str] | None = log_lines
@@ -121,8 +97,7 @@ def cmd_status(name: str | None, as_json: bool) -> None:
                     "command": record.command,
                     "pid": None,
                     "alive": False,
-                    "status": "crashed",
-                    "crashed": True,
+                    "status": "exited",
                     "ports": [],
                     "docker": None,
                     "env_file": record.env_file,
@@ -148,12 +123,7 @@ def cmd_status(name: str | None, as_json: bool) -> None:
     for entry in managed:
         session_str = _format_session(entry.get("session_id"), current_session)
         session_suffix = f"  [{session_str}]" if session_str else ""
-        if entry["status"] == "crash_looping":
-            click.echo(
-                f"  {entry['name']:<12} \u26a0 crash_looping  PID {entry['pid']}  "
-                f"(crashes={entry['crash_count']})  ({entry['command']}){session_suffix}"
-            )
-        elif entry["alive"]:
+        if entry["alive"]:
             ports_str = "  ".join(f":{p}" for p in entry["ports"])
             env_str = f"  env:{entry['env_file']}" if entry.get("env_file") else ""
             click.echo(
@@ -162,7 +132,7 @@ def cmd_status(name: str | None, as_json: bool) -> None:
             )
         else:
             click.echo(
-                f"  {entry['name']:<12} \u2716 crashed  ({entry['command']}){session_suffix}"
+                f"  {entry['name']:<12} \u2716 exited   ({entry['command']}){session_suffix}"
             )
 
     if any_bad:

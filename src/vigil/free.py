@@ -12,7 +12,6 @@ from vigil.config import Config
 from vigil.docker import enrich as docker_enrich
 from vigil.registry import make_registry
 from vigil.scanner import port_socket_state, scan_ports
-from vigil.state import StateManager
 
 
 class FreeResult(TypedDict):
@@ -52,11 +51,8 @@ def free_port(config: Config, port: int) -> FreeResult:
         return FreeResult(port=port, freed=True, was="docker")
 
     if pid is not None:
-        state = StateManager(config)
-        managed_by_pid = {r.pid: r for r in state.read_all() if r.alive}
-        if pid in managed_by_pid:
-            record = managed_by_pid[pid]
-            make_registry(config).stop(record.name)
+        result = make_registry(config).stop_if_pid(pid)
+        if result is not None:
             return FreeResult(port=port, freed=True, was="managed")
 
     if pid is not None:

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 import click
 
 from vigil.config import Config, ConfigError, find_vigil_root
-from vigil.state import StateManager
+from vigil.registry import make_registry
 
 if TYPE_CHECKING:
     from click.shell_completion import CompletionItem
@@ -42,7 +42,7 @@ def complete_process_names(
     try:
         root = find_vigil_root(Path.cwd())
         config = Config(root=root)
-        records = StateManager(config).read_all()
+        records = make_registry(config).all()
         return [CompletionItem(r.name) for r in records if r.name.startswith(incomplete)]
     except ConfigError:
         return []

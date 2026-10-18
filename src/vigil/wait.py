@@ -12,17 +12,12 @@ from vigil.config import Config
 from vigil.registry import make_registry
 
 __all__ = [
-    "CrashLooping",
     "PortMismatch",
     "ProcessDied",
     "ProcessNotFound",
     "WaitTimeout",
     "wait_for_ready",
 ]
-
-
-class CrashLooping(Exception):
-    """Raised when a managed process is detected as crash-looping (circuit open)."""
 
 
 class WaitTimeout(Exception):
@@ -95,19 +90,8 @@ def wait_for_ready(
             if not record.alive:
                 raise ProcessDied(f"Process {name!r} died while waiting for readiness.")
 
-            # Update crash-loop observation; fail fast if circuit is open.
-            # Pass records= to avoid a second statefile read; observe_all snapshots
-            # net_connections once internally and exposes per-process ports in obs["ports"].
-            observations = reg.observe_all(records=records)
-            obs = observations.get(name)
-            if obs and obs["circuit_open"]:
-                count = obs["crash_count"]
-                raise CrashLooping(
-                    f"Process {name!r} is crash-looping (crash_count={count}). "
-                    f"Use 'vigil logs {name}' to investigate."
-                )
-
-            pid_ports = obs["ports"] if obs is not None else []
+            ports_by_name = reg.ports_by_process(records=records)
+            pid_ports = ports_by_name.get(name, [])
 
             # PortMismatch: process alive, has assigned port, but listening on wrong port.
             if record.port is not None and pid_ports and record.port not in pid_ports:

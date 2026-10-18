@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import threading
 import time
@@ -75,6 +76,30 @@ class TestStateReadWrite:
         state.write(record)
         records = state.read_all()
         assert records[0].port is None
+
+    def test_legacy_crash_fields_are_ignored_and_removed_on_write(
+        self, state: StateManager
+    ) -> None:
+        legacy = {
+            "web": {
+                "name": "web",
+                "pid": 1234,
+                "command": "serve",
+                "started_at": None,
+                "crash_count": 5,
+                "last_crash_at": 1000.0,
+                "circuit_open": True,
+            }
+        }
+        state.config.state_file.write_text(json.dumps(legacy))
+
+        record = state.read_unannotated()[0]
+        state.write(record)
+        persisted = json.loads(state.config.state_file.read_text())["web"]
+
+        assert "crash_count" not in persisted
+        assert "last_crash_at" not in persisted
+        assert "circuit_open" not in persisted
 
 
 class TestStateDelete:
@@ -342,3 +367,20 @@ class TestWindowsLocking:
             state.write(make_record(name="win-test", pid=42))
 
         assert mock_locking.called, "msvcrt.locking must be called on Windows"
+
+    def test_lifecycle_lock_uses_blocking_windows_lock(self, state: StateManager) -> None:
+        mock_locking = MagicMock()
+        mock_msvcrt = types.ModuleType("msvcrt")
+        mock_msvcrt.LK_LOCK = 1  # type: ignore[attr-defined]
+        mock_msvcrt.LK_UNLCK = 0  # type: ignore[attr-defined]
+        mock_msvcrt.locking = mock_locking  # type: ignore[attr-defined]
+
+        with (
+            patch("sys.platform", "win32"),
+            patch.dict(sys.modules, {"msvcrt": mock_msvcrt}),
+            state.lifecycle_lock(),
+        ):
+            pass
+
+        assert mock_locking.call_args_list[0].args[1] == 1
+        assert mock_locking.call_args_list[-1].args[1] == 0

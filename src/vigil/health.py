@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from typing import Protocol, TypedDict
 
 from vigil.config import Config
-from vigil.registry import CrashObservation, ProcessRegistry, make_registry
+from vigil.registry import ProcessRegistry, make_registry
 from vigil.state import ProcessRecord
 
 
@@ -69,23 +69,8 @@ class HealthChecker:
         self,
         record: ProcessRecord,
         alive_names: set[str],
-        observations: Mapping[str, CrashObservation],
+        ports_by_name: Mapping[str, list[int]],
     ) -> HealthResult:
-        obs = observations.get(record.name)
-        circuit_open = obs["circuit_open"] if obs else record.circuit_open
-        crash_count = obs["crash_count"] if obs else record.crash_count
-
-        if circuit_open:
-            return HealthResult(
-                name=record.name,
-                healthy=False,
-                ready=False,
-                status="crash_looping",
-                latency_ms=None,
-                error=f"Process is crash-looping (crash_count={crash_count}). "
-                f"Use 'vigil logs {record.name}' to investigate.",
-            )
-
         dead_deps = [d for d in record.depends_on if d not in alive_names]
         if dead_deps:
             return HealthResult(
@@ -97,7 +82,7 @@ class HealthChecker:
                 error=f"dependency down: {', '.join(dead_deps)}",
             )
 
-        ports = self._registry.ports_for_pid(record.pid)
+        ports = ports_by_name.get(record.name, [])
 
         # PortMismatch: process has an assigned port but is listening elsewhere.
         if record.port is not None and ports and record.port not in ports:
@@ -115,7 +100,7 @@ class HealthChecker:
                 name=record.name,
                 healthy=True,
                 ready=False,
-                status="no-port",
+                status="port-pending" if record.port is not None else "no-port",
                 latency_ms=None,
                 error=None,
             )
@@ -152,17 +137,17 @@ class HealthChecker:
     def check_all(self) -> list[HealthResult]:
         """Check health of all alive managed processes. Single statefile read."""
         records = self._registry.all()
-        observations = self._registry.observe_all(records=records)
+        ports_by_name = self._registry.ports_by_process(records=records)
 
         alive_names = {r.name for r in records if r.alive}
         alive_records = [r for r in records if r.alive]
 
-        return [self._check_record(r, alive_names, observations) for r in alive_records]
+        return [self._check_record(r, alive_names, ports_by_name) for r in alive_records]
 
     def check_one(self, name: str) -> HealthResult | None:
         """Check health of a single process. Returns None if not found or dead."""
         records = self._registry.all()
-        observations = self._registry.observe_all(records=records)
+        ports_by_name = self._registry.ports_by_process(records=records)
 
         alive_names = {r.name for r in records if r.alive}
 
@@ -170,7 +155,7 @@ class HealthChecker:
         if record is None or not record.alive:
             return None
 
-        return self._check_record(record, alive_names, observations)
+        return self._check_record(record, alive_names, ports_by_name)
 
 
 def check_health(

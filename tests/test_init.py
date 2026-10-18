@@ -43,6 +43,7 @@ class TestInitNonInteractive:
             assert gitignore.exists()
             content = gitignore.read_text()
             assert "state.json" in content
+            assert "*.lock" in content
             assert "logs/" in content
 
     def test_json_output_contains_status_created(self, runner: CliRunner, tmp_path: Path) -> None:

@@ -12,7 +12,7 @@ import click
 from vigil.commands._shared import complete_process_names, json_error, require_project
 from vigil.config import Config
 from vigil.registry import ProcessNotFound, make_registry
-from vigil.state import StateCorruptedError, StateManager
+from vigil.state import StateCorruptedError
 
 _TIME_WAIT_POLL_INTERVAL = 0.5
 _TIME_WAIT_TIMEOUT = 65.0
@@ -73,7 +73,7 @@ def cmd_stop(
                         msg = r.get("error") or "unknown error"
                         click.echo(f"  \u2717 {r['name']} error: {msg}")
                     else:
-                        click.echo(f"  \u2713 {r['name']} cleaned up (was crashed)")
+                        click.echo(f"  \u2713 {r['name']} cleaned up (had exited)")
             else:
                 click.echo("No managed processes to stop.")
         return
@@ -89,7 +89,7 @@ def cmd_stop(
         current_session = os.environ.get("VIGIL_SESSION_ID")
         if current_session:
             try:
-                records = {r.name: r for r in StateManager(config).read_all()}
+                records = {r.name: r for r in make_registry(config).all()}
                 record = records.get(name)
                 if record and record.session_id and record.session_id != current_session:
                     click.echo(
@@ -132,7 +132,7 @@ def cmd_stop(
         if result["status"] == "stopped":
             click.echo(f"Stopped {name!r}")
         else:
-            click.echo(f"Cleaned up {name!r} (was crashed)")
+            click.echo(f"Cleaned up {name!r} (had exited)")
         if result["time_wait_ports"]:
             ports_str = ", ".join(str(p) for p in result["time_wait_ports"])
             click.echo(

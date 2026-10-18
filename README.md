@@ -17,3 +17,12 @@ uv sync
 ```
 
 See `CLAUDE.md` for development workflow and CLI reference.
+
+## Lifecycle semantics
+
+- Lifecycle operations and registry reads are serialized per project, so concurrent Vigil
+  commands observe a complete before-or-after state.
+- A registered process whose PID is no longer alive is reported as `exited`. Vigil cannot know
+  its exit code because it does not run a resident supervisor.
+- Status, health, and wait commands are read-only. An alive process waiting to bind its assigned
+  port remains alive; `health` reports it as `port-pending` and `wait` applies its timeout.

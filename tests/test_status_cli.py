@@ -85,7 +85,7 @@ class TestStatusCLIJson:
             assert entry["ports"] == [8000]
             assert "crashed" not in entry
 
-    def test_crashed_process_appears_with_crashed_flag(self, runner: CliRunner) -> None:
+    def test_exited_process_appears_without_crashed_flag(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()
             _write_state(
@@ -111,7 +111,8 @@ class TestStatusCLIJson:
             assert entry["name"] == "web"
             assert entry["pid"] is None
             assert entry["alive"] is False
-            assert entry["crashed"] is True
+            assert entry["status"] == "exited"
+            assert "crashed" not in entry
             assert entry["ports"] == []
 
     def test_no_records_when_statefile_is_empty(self, runner: CliRunner) -> None:
@@ -157,7 +158,7 @@ class TestStatusCLIText:
             assert "alive" in result.output
             assert "1234" in result.output
 
-    def test_crashed_process_shows_crashed_warning(self, runner: CliRunner) -> None:
+    def test_exited_process_shows_exited_warning(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
             Path(".vigil").mkdir()
             _write_state(
@@ -178,7 +179,7 @@ class TestStatusCLIText:
 
             assert result.exit_code == 2
             assert "web" in result.output
-            assert "crashed" in result.output
+            assert "exited" in result.output
 
     def test_no_processes_message_when_empty(self, runner: CliRunner) -> None:
         with runner.isolated_filesystem():
@@ -553,7 +554,7 @@ class TestDegradedStatus:
             data = json.loads(result.output)
             entries = {e["name"]: e for e in data["managed"]}
             assert entries["backend"]["status"] == "degraded"
-            assert entries["database"]["status"] == "crashed"
+            assert entries["database"]["status"] == "exited"
 
     def test_json_includes_depends_on_and_dependency_status(self, runner: CliRunner) -> None:
         """JSON output for an alive process includes depends_on and dependency_status."""
@@ -661,3 +662,192 @@ class TestStatusNetConnectionsCallCount:
             assert len(data["managed"]) == 3
             # After fix: exactly 1 call (snapshot before loop), not 3 (one per process)
             assert mock_nc.call_count == 1
+
+
+class TestStatusNameFilter:
+    def test_name_filter_returns_single_entry(self, runner: CliRunner) -> None:
+        """vigil status <name> --json returns only that process entry."""
+        start_time = time.time() - 10
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            _write_state(
+                Path(".vigil"),
+                {
+                    "web": {
+                        "name": "web",
+                        "pid": 1001,
+                        "command": "python -m http.server",
+                        "started_at": start_time,
+                        "port": None,
+                        "cwd": None,
+                    },
+                    "api": {
+                        "name": "api",
+                        "pid": 1002,
+                        "command": "uvicorn main:app",
+                        "started_at": start_time,
+                        "port": None,
+                        "cwd": None,
+                    },
+                },
+            )
+            mock_proc = MagicMock()
+            mock_proc.create_time.return_value = start_time + 0.1
+
+            with (
+                patch("psutil.pid_exists", return_value=True),
+                patch("psutil.Process", return_value=mock_proc),
+                patch("psutil.net_connections", return_value=[]),
+            ):
+                result = runner.invoke(main, ["status", "api", "--json"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data["managed"]) == 1
+        assert data["managed"][0]["name"] == "api"
+
+    def test_name_filter_nonexistent_exits_1_with_error_code(self, runner: CliRunner) -> None:
+        """vigil status nonexistent --json exits 1 with process_not_found code."""
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            _write_state(Path(".vigil"), {})
+            result = runner.invoke(
+                main, ["status", "nonexistent", "--json"], catch_exceptions=False
+            )
+
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["code"] == "process_not_found"
+
+
+class TestStatusLogTail:
+    def test_alive_process_has_no_log_tail_field(self, runner: CliRunner) -> None:
+        """Alive processes do not include log_tail in JSON output."""
+        start_time = time.time() - 10
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            _write_state(
+                Path(".vigil"),
+                {
+                    "web": {
+                        "name": "web",
+                        "pid": 1234,
+                        "command": "python -m http.server",
+                        "started_at": start_time,
+                        "port": None,
+                        "cwd": None,
+                    }
+                },
+            )
+            mock_proc = MagicMock()
+            mock_proc.create_time.return_value = start_time + 0.1
+
+            with (
+                patch("psutil.pid_exists", return_value=True),
+                patch("psutil.Process", return_value=mock_proc),
+                patch("psutil.net_connections", return_value=[]),
+            ):
+                result = runner.invoke(main, ["status", "--json"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        entry = data["managed"][0]
+        assert "log_tail" not in entry
+
+    def test_crashed_process_includes_log_tail_lines(self, runner: CliRunner) -> None:
+        """Crashed processes include log_tail with last log lines."""
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            logs_dir = Path(".vigil/logs")
+            logs_dir.mkdir()
+            (logs_dir / "web.log").write_text("line1\nline2\nline3\n")
+
+            _write_state(
+                Path(".vigil"),
+                {
+                    "web": {
+                        "name": "web",
+                        "pid": 9999,
+                        "command": "python -m http.server",
+                        "started_at": time.time() - 100,
+                        "port": None,
+                        "cwd": None,
+                    }
+                },
+            )
+            with patch("psutil.pid_exists", return_value=False):
+                result = runner.invoke(main, ["status", "--json"], catch_exceptions=False)
+
+        assert result.exit_code == 2
+        data = json.loads(result.output)
+        entry = data["managed"][0]
+        assert "log_tail" in entry
+        assert entry["log_tail"] == ["line1", "line2", "line3"]
+
+    def test_crashed_process_log_tail_null_when_no_log_file(self, runner: CliRunner) -> None:
+        """Crashed processes have log_tail=null when no log file exists."""
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            _write_state(
+                Path(".vigil"),
+                {
+                    "web": {
+                        "name": "web",
+                        "pid": 9999,
+                        "command": "python -m http.server",
+                        "started_at": time.time() - 100,
+                        "port": None,
+                        "cwd": None,
+                    }
+                },
+            )
+            with patch("psutil.pid_exists", return_value=False):
+                result = runner.invoke(main, ["status", "--json"], catch_exceptions=False)
+
+        assert result.exit_code == 2
+        data = json.loads(result.output)
+        entry = data["managed"][0]
+        assert "log_tail" in entry
+        assert entry["log_tail"] is None
+
+    def test_legacy_crash_loop_fields_are_ignored(self, runner: CliRunner) -> None:
+        """Legacy crash-loop fields do not change observation semantics."""
+        start_time = time.time() - 10
+        with runner.isolated_filesystem():
+            Path(".vigil").mkdir()
+            logs_dir = Path(".vigil/logs")
+            logs_dir.mkdir()
+            (logs_dir / "web.log").write_text("crash log line\n")
+
+            _write_state(
+                Path(".vigil"),
+                {
+                    "web": {
+                        "name": "web",
+                        "pid": 1234,
+                        "command": "python -m http.server",
+                        "started_at": start_time,
+                        "port": None,
+                        "cwd": None,
+                        "circuit_open": True,
+                        "crash_count": 5,
+                        "last_crash_at": start_time + 5,
+                    }
+                },
+            )
+            mock_proc = MagicMock()
+            mock_proc.create_time.return_value = start_time + 0.1
+
+            with (
+                patch("psutil.pid_exists", return_value=True),
+                patch("psutil.Process", return_value=mock_proc),
+                patch("psutil.net_connections", return_value=[]),
+            ):
+                result = runner.invoke(main, ["status", "--json"], catch_exceptions=False)
+
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        entry = data["managed"][0]
+        assert entry["status"] == "alive"
+        assert "crash_count" not in entry
+        assert "log_tail" not in entry

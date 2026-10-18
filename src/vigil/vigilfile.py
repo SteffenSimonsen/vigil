@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import tomllib
 from dataclasses import dataclass, field
 from graphlib import CycleError, TopologicalSorter
@@ -143,8 +142,16 @@ def _start(
     force: bool = False,
     env: dict[str, str] | None = None,
     cwd: str | None = None,
+    depends_on: list[str] | None = None,
 ) -> ProcessRecord:
-    return make_registry(config).start(name, command, force=force, env=env, cwd=cwd)
+    return make_registry(config).start(
+        name,
+        command,
+        force=force,
+        env=env,
+        cwd=cwd,
+        depends_on=depends_on,
+    )
 
 
 def _wait(
@@ -201,6 +208,7 @@ def up(
                 force=force,
                 env=entry.env or None,
                 cwd=entry.cwd,
+                depends_on=entry.depends_on,
             )
         except ProcessAlreadyRunning:
             results.append({"name": entry.name, "status": "skipped", "pid": None, "error": None})
@@ -209,11 +217,6 @@ def up(
             results.append({"name": entry.name, "status": "failed", "pid": None, "error": str(exc)})
             failed.add(entry.name)
             continue
-
-        # Persist depends_on so status can compute degraded state
-        if entry.depends_on:
-            with contextlib.suppress(KeyError):
-                make_registry(config).set_depends_on(entry.name, entry.depends_on)
 
         if no_wait:
             results.append({"name": entry.name, "status": "started", "pid": rec.pid, "error": None})

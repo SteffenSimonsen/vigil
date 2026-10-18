@@ -69,7 +69,13 @@ def scan_all() -> list[Listener]:
     return _snapshot()
 
 
-def next_free_port(start: int = 3000, count: int = 1, *, end: int | None = None) -> int | list[int]:
+def next_free_port(
+    start: int = 3000,
+    count: int = 1,
+    *,
+    end: int | None = None,
+    excluded: set[int] | None = None,
+) -> int | list[int]:
     """Find free port(s) starting from *start*.
 
     Reads the OS socket table exactly once. Returns a single int when
@@ -88,6 +94,7 @@ def next_free_port(start: int = 3000, count: int = 1, *, end: int | None = None)
         laddr_port = getattr(c.laddr, "port", None)
         if isinstance(laddr_port, int) and c.status in ("LISTEN", "TIME_WAIT"):
             occupied.add(laddr_port)
+    occupied.update(excluded or set())
     found: list[int] = []
     port = start
     while len(found) < count:

@@ -12,8 +12,8 @@ import click
 from vigil.commands._shared import json_error
 from vigil.config import Config, ConfigError, find_vigil_root
 from vigil.docker import enrich as docker_enrich
+from vigil.registry import make_registry
 from vigil.scanner import ports_for_pid, scan_all, scan_ports
-from vigil.state import StateManager
 
 _DEFAULT_DEV_PORTS: list[int] = [
     *range(3000, 4000),
@@ -62,7 +62,7 @@ def cmd_scan(
         with contextlib.suppress(ConfigError, Exception):
             root = find_vigil_root(Path.cwd())
             config = Config(root=root)
-            records = StateManager(config).read_all()
+            records = make_registry(config).all()
             dev_port_set = set(_DEFAULT_DEV_PORTS)
             for record in records:
                 if record.alive:

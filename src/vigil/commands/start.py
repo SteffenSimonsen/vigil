@@ -9,7 +9,7 @@ import click
 
 from vigil.commands._shared import json_error, require_project
 from vigil.config import Config
-from vigil.registry import PortOccupied, ProcessAlreadyRunning, ProcessCrashed, make_registry
+from vigil.registry import PortOccupied, ProcessAlreadyRunning, ProcessExited, make_registry
 from vigil.state import StateCorruptedError
 
 
@@ -79,9 +79,9 @@ def cmd_start(
             json_error(str(e), "already_running")
         click.echo(str(e), err=True)
         sys.exit(1)
-    except ProcessCrashed as e:
+    except ProcessExited as e:
         if as_json:
-            json_error(str(e), "process_crashed")
+            json_error(str(e), "process_exited")
         click.echo(str(e), err=True)
         sys.exit(1)
     except PortOccupied as e:
@@ -98,14 +98,14 @@ def cmd_start(
     if no_wait:
         status = "started"
     else:
-        from vigil.wait import CrashLooping, ProcessDied, WaitTimeout, wait_for_ready
+        from vigil.wait import ProcessDied, WaitTimeout, wait_for_ready
 
         try:
             wait_for_ready(config, name, timeout=30, port=record.port)
             status = "ready"
-        except (ProcessDied, CrashLooping) as e:
+        except ProcessDied as e:
             if as_json:
-                json_error(str(e), "process_crashed")
+                json_error(str(e), "process_exited")
             click.echo(str(e), err=True)
             sys.exit(1)
         except WaitTimeout as e:

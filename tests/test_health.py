@@ -78,8 +78,6 @@ def _write_record(
     started_at: float = 1000.0,
     port: int | None = None,
     depends_on: list[str] | None = None,
-    circuit_open: bool = False,
-    crash_count: int = 0,
 ) -> ProcessRecord:
     record = ProcessRecord(
         name=name,
@@ -88,8 +86,6 @@ def _write_record(
         started_at=started_at,
         port=port,
         depends_on=depends_on or [],
-        circuit_open=circuit_open,
-        crash_count=crash_count,
     )
     StateManager(cfg).write(record)
     return record
@@ -133,7 +129,7 @@ class TestHealthChecker:
         """check_all() reads the statefile exactly once."""
         _write_record(cfg, pid=12345)
         reg = _reg(cfg, alive_pids={12345}, pid_to_ports={12345: []})
-        with patch.object(reg, "_read_records", wraps=reg._read_records) as mock_read:
+        with patch.object(reg, "_read_records_locked", wraps=reg._read_records_locked) as mock_read:
             checker = HealthChecker(reg)
             checker.check_all()
         assert mock_read.call_count == 1
@@ -210,17 +206,16 @@ class TestHealthChecker:
         results = HealthChecker(reg).check_all()
         assert results == []
 
-    # --- Cycle 9: circuit open → crash_looping, http prober not called ---
+    # --- Cycle 9: assigned port not listening → port-pending ---
 
-    def test_circuit_open_bypasses_http_prober(self, cfg: Config) -> None:
-        _write_record(cfg, pid=12345, circuit_open=True, crash_count=5)
-        fake_http = FakeHttpProber(status_code=200)
-        reg = _reg(cfg, alive_pids={12345}, pid_to_ports={12345: [8080]})
-        results = HealthChecker(reg, http_prober=fake_http).check_all()
+    def test_assigned_port_without_listener_is_pending(self, cfg: Config) -> None:
+        _write_record(cfg, pid=12345, port=8080)
+        reg = _reg(cfg, alive_pids={12345}, pid_to_ports={12345: []})
+        results = HealthChecker(reg).check_all()
 
-        assert results[0]["healthy"] is False
-        assert results[0]["status"] == "crash_looping"
-        assert fake_http.calls == []  # http prober must not be called
+        assert results[0]["healthy"] is True
+        assert results[0]["ready"] is False
+        assert results[0]["status"] == "port-pending"
 
     # --- Cycle 10: degraded dependency ---
 

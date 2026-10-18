@@ -448,7 +448,14 @@ class TestDependsOn:
         ]
 
         def fake_start(cfg: Config, name: str, command: str, **kwargs: object) -> ProcessRecord:
-            rec = ProcessRecord(name=name, pid=1234, command=command, started_at=1000.0)
+            depends_on = kwargs.get("depends_on")
+            rec = ProcessRecord(
+                name=name,
+                pid=1234,
+                command=command,
+                started_at=1000.0,
+                depends_on=depends_on if isinstance(depends_on, list) else [],
+            )
             StateManager(cfg).write(rec)
             return rec
 

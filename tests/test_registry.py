@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from vigil.config import Config
-from vigil.registry import PortOccupied, ProcessRegistry
+from vigil.registry import PortOccupied, ProcessAlreadyRunning, ProcessRegistry
 from vigil.state import ProcessRecord, StateManager
 
 
@@ -40,9 +41,6 @@ def _write_record(
     port: int | None = None,
     env_file: str | None = None,
     env_keys: list[str] | None = None,
-    crash_count: int = 0,
-    circuit_open: bool = False,
-    last_crash_at: float | None = None,
 ) -> ProcessRecord:
     record = ProcessRecord(
         name=name,
@@ -52,9 +50,6 @@ def _write_record(
         port=port,
         env_file=env_file,
         env_keys=env_keys or [],
-        crash_count=crash_count,
-        circuit_open=circuit_open,
-        last_crash_at=last_crash_at,
     )
     StateManager(config).write(record)
     return record
@@ -84,6 +79,25 @@ class FakeSpawner:
     ) -> tuple[int, float | None]:
         self.calls.append({"command": command, "cwd": cwd, "env": env, "log_path": log_path})
         return self._pid, self._started_at
+
+
+class SequenceSpawner(FakeSpawner):
+    def __init__(self) -> None:
+        super().__init__()
+        self._next_pid = 99001
+
+    def spawn(
+        self,
+        command: str,
+        *,
+        cwd: str,
+        env: dict[str, str] | None,
+        log_path: str,
+    ) -> tuple[int, float | None]:
+        self.calls.append({"command": command, "cwd": cwd, "env": env, "log_path": log_path})
+        pid = self._next_pid
+        self._next_pid += 1
+        return pid, 2000.0
 
 
 class FakeKiller:
@@ -123,6 +137,165 @@ class TestSetDependsOn:
         result = reg.get("web")
         assert result is not None
         assert result.depends_on == ["db", "cache"]
+
+
+class TestLifecycleConcurrency:
+    def test_concurrent_start_same_name_spawns_once(self, config: Config) -> None:
+        entered_spawn = threading.Event()
+        release_spawn = threading.Event()
+
+        class BlockingSpawner(FakeSpawner):
+            def spawn(
+                self,
+                command: str,
+                *,
+                cwd: str,
+                env: dict[str, str] | None,
+                log_path: str,
+            ) -> tuple[int, float | None]:
+                entered_spawn.set()
+                assert release_spawn.wait(timeout=2)
+                return super().spawn(command, cwd=cwd, env=env, log_path=log_path)
+
+        spawner = BlockingSpawner()
+        liveness = FakeLivenessChecker({99001})
+        results: list[ProcessRecord] = []
+        errors: list[Exception] = []
+
+        def start() -> None:
+            try:
+                results.append(
+                    ProcessRegistry(config, spawner=spawner, liveness_checker=liveness).start(
+                        "web", "sleep 60"
+                    )
+                )
+            except Exception as exc:
+                errors.append(exc)
+
+        first = threading.Thread(target=start)
+        second = threading.Thread(target=start)
+        first.start()
+        assert entered_spawn.wait(timeout=2)
+        second.start()
+        release_spawn.set()
+        first.join(timeout=2)
+        second.join(timeout=2)
+
+        assert len(results) == 1
+        assert len(spawner.calls) == 1
+        assert len(errors) == 1
+        assert isinstance(errors[0], ProcessAlreadyRunning)
+
+    def test_registry_read_waits_for_start_transition(self, config: Config) -> None:
+        entered_spawn = threading.Event()
+        release_spawn = threading.Event()
+        read_finished = threading.Event()
+
+        class BlockingSpawner(FakeSpawner):
+            def spawn(
+                self,
+                command: str,
+                *,
+                cwd: str,
+                env: dict[str, str] | None,
+                log_path: str,
+            ) -> tuple[int, float | None]:
+                entered_spawn.set()
+                assert release_spawn.wait(timeout=2)
+                return super().spawn(command, cwd=cwd, env=env, log_path=log_path)
+
+        spawner = BlockingSpawner()
+        registry = ProcessRegistry(config, spawner=spawner)
+        starter = threading.Thread(target=lambda: registry.start("web", "sleep 60"))
+        starter.start()
+        assert entered_spawn.wait(timeout=2)
+
+        observed: list[ProcessRecord] = []
+
+        def read() -> None:
+            observed.extend(registry.all())
+            read_finished.set()
+
+        reader = threading.Thread(target=read)
+        reader.start()
+        assert not read_finished.wait(timeout=0.05)
+        release_spawn.set()
+        starter.join(timeout=2)
+        reader.join(timeout=2)
+
+        assert read_finished.is_set()
+        assert [record.name for record in observed] == ["web"]
+
+    def test_auto_ports_exclude_alive_registry_reservations(self, config: Config) -> None:
+        spawner = SequenceSpawner()
+        liveness = FakeLivenessChecker({99001, 99002})
+        registry = ProcessRegistry(config, spawner=spawner, liveness_checker=liveness)
+
+        with patch("psutil.net_connections", return_value=[]):
+            first = registry.start("web", "serve", auto_port=True)
+            second = registry.start("api", "serve", auto_port=True)
+
+        assert first.port == 3000
+        assert second.port == 3001
+
+    def test_failed_state_write_kills_new_child(self, config: Config) -> None:
+        spawner = FakeSpawner()
+        killer = FakeKiller()
+        registry = ProcessRegistry(config, spawner=spawner, killer=killer)
+
+        with (
+            patch.object(StateManager, "write", side_effect=OSError("disk full")),
+            pytest.raises(OSError, match="disk full"),
+        ):
+            registry.start("web", "serve")
+
+        assert killer.killed == [99001]
+
+    def test_failed_restart_retains_old_record(self, config: Config) -> None:
+        spawner = MagicMock()
+        spawner.spawn.side_effect = [(99001, 1000.0), OSError("spawn failed")]
+        killer = FakeKiller()
+        liveness = FakeLivenessChecker({99001})
+        registry = ProcessRegistry(
+            config,
+            spawner=spawner,
+            killer=killer,
+            liveness_checker=liveness,
+        )
+        registry.start("web", "serve", port=8080, depends_on=["db"])
+
+        with pytest.raises(OSError, match="spawn failed"):
+            registry.restart("web")
+
+        records = StateManager(config).read_unannotated()
+        assert len(records) == 1
+        assert records[0].pid == 99001
+        assert records[0].port == 8080
+        assert records[0].depends_on == ["db"]
+
+    def test_force_start_validates_before_killing_existing_process(self, config: Config) -> None:
+        _write_record(config, pid=99001)
+        killer = FakeKiller()
+        registry = ProcessRegistry(
+            config,
+            killer=killer,
+            liveness_checker=FakeLivenessChecker({99001}),
+        )
+
+        with pytest.raises(ValueError, match="Command cannot be empty"):
+            registry.start("web", "", force=True)
+
+        assert killer.killed == []
+
+    def test_stop_if_pid_ignores_reused_pid(self, config: Config) -> None:
+        _write_record(config, pid=99001)
+        registry = ProcessRegistry(
+            config,
+            liveness_checker=FakeLivenessChecker(),
+        )
+
+        assert registry.stop_if_pid(99001) is None
+        assert StateManager(config).read_unannotated()[0].name == "web"
 
 
 # ── Cycle 2: restart preserves env_file ──────────────────────────────────────
@@ -185,86 +358,43 @@ class TestRestartPreservesEnvFile:
             assert env.get("MY_VAR") == "stable"
 
 
-# ── Cycle 4: observe_all returns results without re-reading ───────────────────
+# ── Cycle 4: port snapshots are read-only ─────────────────────────────────────
 
 
-class TestObserveAll:
-    def test_observe_all_returns_results_without_rereading(self, config: Config) -> None:
-        """observe_all() result matches what a subsequent all() call shows."""
-        # Process alive, has port, port is NOT listening → crash observation
-        _write_record(config, name="web", pid=99001, port=8080, crash_count=0)
+class TestPortsByProcess:
+    def test_snapshot_does_not_modify_state(self, config: Config) -> None:
+        _write_record(config, name="web", pid=99001, port=8080)
+        state_before = config.state_file.read_bytes()
+        reg = ProcessRegistry(config, liveness_checker=FakeLivenessChecker({99001}))
 
-        liveness = FakeLivenessChecker(alive_pids={99001})
+        with patch("psutil.net_connections", return_value=[]):
+            assert reg.ports_by_process() == {"web": []}
 
-        reg = ProcessRegistry(
-            config,
-            liveness_checker=liveness,
-            clock=lambda: 5000.0,
-        )
+        assert config.state_file.read_bytes() == state_before
 
-        with patch("psutil.net_connections", return_value=[]):  # port absent
-            observations = reg.observe_all()
-        records_after = reg.all()
-
-        assert "web" in observations
-        obs = observations["web"]
-        assert obs["crash_count"] == 1
-        assert obs["circuit_open"] is False
-
-        # all() should reflect the same state as the observation
-        web_record = next(r for r in records_after if r.name == "web")
-        assert web_record.crash_count == 1
-        assert web_record.circuit_open is False
-
-    def test_circuit_opens_after_threshold(self, config: Config) -> None:
-        """After crash_threshold port-absent observations, circuit_open becomes True."""
-        _write_record(config, name="web", pid=99001, port=8080, crash_count=4)
-
-        liveness = FakeLivenessChecker(alive_pids={99001})
-
-        reg = ProcessRegistry(
-            config,
-            liveness_checker=liveness,
-            clock=lambda: 5000.0,
-        )
-
-        with patch("psutil.net_connections", return_value=[]):  # port absent
-            observations = reg.observe_all(crash_threshold=5)
-
-        assert observations["web"]["circuit_open"] is True
-        assert observations["web"]["crash_count"] == 5
-
-        # Verify state was persisted
-        record = reg.get("web")
-        assert record is not None
-        assert record.circuit_open is True
-        assert record.crash_count == 5
-
-    def test_observe_all_snapshots_net_connections_once(self, config: Config) -> None:
-        """observe_all() calls net_connections() exactly once for N records with ports."""
+    def test_snapshot_reads_net_connections_once(self, config: Config) -> None:
         _write_record(config, name="web", pid=99001, port=8080)
         _write_record(config, name="api", pid=99002, port=9090)
 
         liveness = FakeLivenessChecker(alive_pids={99001, 99002})
-        reg = ProcessRegistry(config, liveness_checker=liveness, clock=lambda: 5000.0)
+        reg = ProcessRegistry(config, liveness_checker=liveness)
 
         with patch("psutil.net_connections", return_value=[]) as mock_conns:
-            reg.observe_all()
+            reg.ports_by_process()
 
         assert mock_conns.call_count == 1
 
-    def test_observe_all_includes_ports_in_observation(self, config: Config) -> None:
-        """CrashObservation includes the listening ports for the process."""
+    def test_snapshot_includes_process_ports(self, config: Config) -> None:
         _write_record(config, name="web", pid=99001, port=8080)
 
         liveness = FakeLivenessChecker(alive_pids={99001})
-        reg = ProcessRegistry(config, liveness_checker=liveness, clock=lambda: 5000.0)
+        reg = ProcessRegistry(config, liveness_checker=liveness)
 
         conn = _listen_conn(99001, 8080)
         with patch("psutil.net_connections", return_value=[conn]):
-            observations = reg.observe_all()
+            ports = reg.ports_by_process()
 
-        assert observations["web"]["ports"] == [8080]
+        assert ports["web"] == [8080]
 
 
 # ── Cycle 5: DefaultSpawner / DefaultKiller / DefaultLivenessChecker end-to-end

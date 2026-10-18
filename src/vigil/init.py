@@ -49,7 +49,7 @@ def _write_vigilfile(root: Path, processes: list[ProcessDef]) -> None:
 
 
 def _write_gitignore(vigil_dir: Path) -> None:
-    (vigil_dir / ".gitignore").write_text("state.json\nlogs/\n")
+    (vigil_dir / ".gitignore").write_text("state.json\n*.lock\nlogs/\n")
 
 
 class VigilfileExistsError(Exception):

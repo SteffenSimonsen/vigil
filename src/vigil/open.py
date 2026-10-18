@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from vigil.config import Config
+from vigil.registry import make_registry
 from vigil.scanner import ports_for_pid
-from vigil.state import StateManager
 
 
 class UnknownProcess(Exception):
@@ -27,8 +27,7 @@ def resolve_url(config: Config, target: str) -> str:
         return f"http://localhost:{target}"
 
     # Look up by name in statefile
-    sm = StateManager(config)
-    records = sm.read_all()
+    records = make_registry(config).all()
     for record in records:
         if record.name == target:
             # Check Vigilfile for url override

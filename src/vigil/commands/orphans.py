@@ -9,7 +9,8 @@ import click
 from vigil.commands._shared import json_error, require_project
 from vigil.config import Config
 from vigil.orphans import find_orphans
-from vigil.state import StateCorruptedError, StateManager
+from vigil.registry import make_registry
+from vigil.state import StateCorruptedError
 
 
 @click.command("orphans")
@@ -20,7 +21,7 @@ def cmd_orphans(as_json: bool) -> None:
     config = Config(root=root)
 
     try:
-        records = StateManager(config).read_all()
+        records = make_registry(config).all()
     except StateCorruptedError as e:
         if as_json:
             json_error(str(e), "state_corrupted")

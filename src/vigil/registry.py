@@ -7,10 +7,8 @@ import os
 import shlex
 import subprocess
 import sys
-import time
-from collections.abc import Callable
 from pathlib import Path
-from typing import Protocol, TypedDict
+from typing import Protocol, TypedDict, runtime_checkable
 
 from vigil.config import Config
 from vigil.logs import trim_log
@@ -27,8 +25,8 @@ class ProcessAlreadyRunning(Exception):
     """Raised when a process is alive and force=False."""
 
 
-class ProcessCrashed(Exception):
-    """Raised when a process is registered but dead and force=False."""
+class ProcessExited(Exception):
+    """Raised when a process is registered but no longer alive and force=False."""
 
 
 class PortOccupied(Exception):
@@ -48,13 +46,6 @@ class StopAllEntry(TypedDict):
     status: str
     error: str | None
     time_wait_ports: list[int]
-
-
-class CrashObservation(TypedDict):
-    circuit_open: bool
-    crash_count: int
-    last_crash_at: float | None
-    ports: list[int]
 
 
 # ── OS-boundary protocols ─────────────────────────────────────────────────────
@@ -79,6 +70,11 @@ class PortProber(Protocol):
     def listening_ports(self, pid: int) -> list[int]: ...
 
     def port_state(self, port: int) -> str: ...
+
+
+@runtime_checkable
+class BatchPortProber(Protocol):
+    def listening_ports_by_pid(self, pids: set[int]) -> dict[int, list[int]]: ...
 
 
 class LivenessChecker(Protocol):
@@ -175,6 +171,11 @@ class DefaultPortProber:
 
         return port_socket_state(port)
 
+    def listening_ports_by_pid(self, pids: set[int]) -> dict[int, list[int]]:
+        from vigil.scanner import ports_by_pid
+
+        return ports_by_pid(pids)
+
 
 _START_TIME_TOLERANCE = 30.0
 
@@ -208,18 +209,16 @@ class ProcessRegistry:
         killer: ProcessKiller | None = None,
         port_prober: PortProber | None = None,
         liveness_checker: LivenessChecker | None = None,
-        clock: Callable[[], float] = time.time,
     ) -> None:
         self._config = config
         self._spawner: ProcessSpawner = spawner or DefaultSpawner()
         self._killer: ProcessKiller = killer or DefaultKiller()
         self._port_prober: PortProber = port_prober or DefaultPortProber()
         self._liveness_checker: LivenessChecker = liveness_checker or DefaultLivenessChecker()
-        self._clock = clock
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
-    def _read_records(self) -> list[ProcessRecord]:
+    def _read_records_locked(self) -> list[ProcessRecord]:
         """Read all records, annotating alive via the injected liveness checker."""
         state = StateManager(self._config)
         raw_records = state.read_unannotated()
@@ -227,15 +226,22 @@ class ProcessRegistry:
             r.alive = self._liveness_checker.is_alive(r.pid, r.started_at)
         return raw_records
 
-    def _get_or_raise(self, name: str) -> ProcessRecord:
-        records = {r.name: r for r in self._read_records()}
+    def _get_or_raise_locked(self, name: str) -> ProcessRecord:
+        records = {r.name: r for r in self._read_records_locked()}
         if name not in records:
             raise ProcessNotFound(f"No managed process named {name!r}.")
         return records[name]
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    def _resolve_port(self, auto_port: bool, port: int | None) -> int | None:
+    def _resolve_port(
+        self,
+        auto_port: bool,
+        port: int | None,
+        records: list[ProcessRecord],
+        *,
+        replacing: str | None = None,
+    ) -> int | None:
         """Pick or validate a port. Returns the resolved port, or None if neither requested."""
         if auto_port and port is not None:
             raise ValueError("--auto-port and --port are mutually exclusive")
@@ -243,11 +249,22 @@ class ProcessRegistry:
             return None
         from vigil.scanner import next_free_port, port_socket_state
 
+        reserved_ports = {
+            record.port
+            for record in records
+            if record.alive and record.port is not None and record.name != replacing
+        }
+
         if auto_port:
             start, end = self._config.port_range
-            return next_free_port(start, end=end)  # type: ignore[return-value]
+            return next_free_port(start, end=end, excluded=reserved_ports)  # type: ignore[return-value]
         # explicit port requested
         assert port is not None
+        if port in reserved_ports:
+            holder = next(record for record in records if record.alive and record.port == port)
+            raise PortOccupied(
+                f"Port {port} is reserved by managed process {holder.name!r} (pid {holder.pid})."
+            )
         state = port_socket_state(port)
         if state == "listen":
             import contextlib
@@ -284,25 +301,33 @@ class ProcessRegistry:
         port: int | None = None,
     ) -> ProcessRecord:
         state = StateManager(self._config)
-        existing = {r.name: r for r in self._read_records()}
+        with state.lifecycle_lock():
+            return self._start_locked(
+                name,
+                command,
+                force=force,
+                env=env,
+                env_file=env_file,
+                cwd=cwd,
+                depends_on=depends_on,
+                auto_port=auto_port,
+                port=port,
+            )
 
-        if name in existing:
-            rec = existing[name]
-            if rec.alive:
-                if not force:
-                    raise ProcessAlreadyRunning(
-                        f"Process {name!r} is already running (pid {rec.pid}). "
-                        "Use --force to restart it."
-                    )
-                self._killer.kill(rec.pid, grace=self._config.stop_grace_period)
-                state.delete(name)
-            else:
-                if not force:
-                    raise ProcessCrashed(
-                        f"Process {name!r} crashed (pid {rec.pid}). "
-                        "Use --force to start a fresh one."
-                    )
-
+    def _start_locked(
+        self,
+        name: str,
+        command: str,
+        *,
+        force: bool = False,
+        env: dict[str, str] | None = None,
+        env_file: str | None = None,
+        cwd: str | None = None,
+        depends_on: list[str] | None = None,
+        auto_port: bool = False,
+        port: int | None = None,
+    ) -> ProcessRecord:
+        state = StateManager(self._config)
         if not name.strip():
             raise ValueError("Process name cannot be empty.")
         if len(name) > 200:
@@ -316,8 +341,29 @@ class ProcessRegistry:
             )
         if not command.strip():
             raise ValueError("Command cannot be empty")
+        if auto_port and port is not None:
+            raise ValueError("--auto-port and --port are mutually exclusive")
 
-        resolved_port = self._resolve_port(auto_port, port)
+        records = self._read_records_locked()
+        existing = {r.name: r for r in records}
+
+        if name in existing:
+            rec = existing[name]
+            if rec.alive:
+                if not force:
+                    raise ProcessAlreadyRunning(
+                        f"Process {name!r} is already running (pid {rec.pid}). "
+                        "Use --force to restart it."
+                    )
+                self._killer.kill(rec.pid, grace=self._config.stop_grace_period)
+            else:
+                if not force:
+                    raise ProcessExited(
+                        f"Process {name!r} exited (pid {rec.pid}). "
+                        "Use --force to start a fresh one."
+                    )
+
+        resolved_port = self._resolve_port(auto_port, port, records, replacing=name)
 
         effective_cwd = str(Path(cwd) if cwd else self._config.root)
         log_path = str(self._config.logs_dir / f"{name}.log")
@@ -365,12 +411,38 @@ class ProcessRegistry:
             session_id=os.environ.get("VIGIL_SESSION_ID"),
             depends_on=depends_on or [],
         )
-        state.write(record)
+        try:
+            state.write(record)
+        except Exception:
+            with contextlib.suppress(Exception):
+                self._killer.kill(pid, grace=self._config.stop_grace_period)
+            raise
         return record
 
     def stop(self, name: str) -> StopResult:
         state = StateManager(self._config)
-        record = self._get_or_raise(name)
+        with state.lifecycle_lock():
+            return self._stop_locked(name)
+
+    def stop_if_pid(self, pid: int) -> StopResult | None:
+        """Atomically stop the managed process still associated with *pid*."""
+        state = StateManager(self._config)
+        with state.lifecycle_lock():
+            record = next(
+                (
+                    candidate
+                    for candidate in self._read_records_locked()
+                    if candidate.alive and candidate.pid == pid
+                ),
+                None,
+            )
+            if record is None:
+                return None
+            return self._stop_locked(record.name)
+
+    def _stop_locked(self, name: str) -> StopResult:
+        state = StateManager(self._config)
+        record = self._get_or_raise_locked(name)
         was_alive = record.alive
 
         held_ports: list[int] = []
@@ -388,149 +460,108 @@ class ProcessRegistry:
         )
 
     def restart(self, name: str) -> ProcessRecord:
-        record = self._get_or_raise(name)
-        self.stop(name)
-        return self.start(
-            name,
-            record.command,
-            force=True,
-            cwd=record.cwd,
-            env_file=record.env_file,  # preserved — fixes the silent data-loss bug
-        )
+        state = StateManager(self._config)
+        with state.lifecycle_lock():
+            record = self._get_or_raise_locked(name)
+            if record.alive:
+                self._killer.kill(record.pid, grace=self._config.stop_grace_period)
+            trim_log(self._config, name, max_lines=self._config.log_retention_lines)
+            return self._start_locked(
+                name,
+                record.command,
+                force=True,
+                cwd=record.cwd,
+                env_file=record.env_file,
+                depends_on=record.depends_on,
+                port=record.port,
+            )
 
     def remove(self, name: str, *, force: bool = False) -> None:
-        record = self._get_or_raise(name)
-        if record.alive and not force:
-            raise ProcessAlreadyRunning(
-                f"Process {name!r} is still running (pid {record.pid}). "
-                "Use --force to remove the registry entry without stopping it."
-            )
-        StateManager(self._config).delete(name)
+        state = StateManager(self._config)
+        with state.lifecycle_lock():
+            record = self._get_or_raise_locked(name)
+            if record.alive and not force:
+                raise ProcessAlreadyRunning(
+                    f"Process {name!r} is still running (pid {record.pid}). "
+                    "Use --force to remove the registry entry without stopping it."
+                )
+            state.delete(name)
 
     def stop_all(self) -> list[StopAllEntry]:
-        records = self._read_records()
-        results: list[StopAllEntry] = []
-        for record in records:
-            try:
-                result = self.stop(record.name)
-                results.append(
-                    StopAllEntry(
-                        name=record.name,
-                        status=result["status"],
-                        error=None,
-                        time_wait_ports=result["time_wait_ports"],
+        state = StateManager(self._config)
+        with state.lifecycle_lock():
+            records = self._read_records_locked()
+            results: list[StopAllEntry] = []
+            for record in records:
+                try:
+                    result = self._stop_locked(record.name)
+                    results.append(
+                        StopAllEntry(
+                            name=record.name,
+                            status=result["status"],
+                            error=None,
+                            time_wait_ports=result["time_wait_ports"],
+                        )
                     )
-                )
-            except Exception as exc:
-                results.append(
-                    StopAllEntry(
-                        name=record.name,
-                        status="error",
-                        error=str(exc),
-                        time_wait_ports=[],
+                except Exception as exc:
+                    results.append(
+                        StopAllEntry(
+                            name=record.name,
+                            status="error",
+                            error=str(exc),
+                            time_wait_ports=[],
+                        )
                     )
-                )
-        return results
+            return results
 
     def set_depends_on(self, name: str, depends_on: list[str]) -> None:
-        StateManager(self._config).update(name, depends_on=depends_on)
+        state = StateManager(self._config)
+        with state.lifecycle_lock():
+            state.update(name, depends_on=depends_on)
 
     # ── Observation ───────────────────────────────────────────────────────────
 
-    def observe_all(
-        self,
-        records: list[ProcessRecord] | None = None,
-        *,
-        crash_threshold: int = 5,
-    ) -> dict[str, CrashObservation]:
-        """Update crash-loop state for all processes and return observations.
-
-        If *records* is provided, use it directly (avoids a second statefile read).
-        Returns results directly — callers do not need to re-read state.
-        """
-        from vigil.scanner import ports_by_pid
-
-        state = StateManager(self._config)
+    def ports_by_process(self, records: list[ProcessRecord] | None = None) -> dict[str, list[int]]:
+        """Return a read-only listening-port snapshot keyed by process name."""
         if records is None:
-            records = self._read_records()
+            records = self.all()
 
-        # Snapshot the socket table once for all alive processes.
         alive_pids = {r.pid for r in records if r.alive}
-        pid_ports_map = ports_by_pid(alive_pids) if alive_pids else {}
-
-        results: dict[str, CrashObservation] = {}
-
-        for record in records:
-            name = record.name
-            if not record.alive or record.port is None:
-                results[name] = CrashObservation(
-                    circuit_open=record.circuit_open,
-                    crash_count=record.crash_count,
-                    last_crash_at=record.last_crash_at,
-                    ports=pid_ports_map.get(record.pid, []) if record.alive else [],
-                )
-                continue
-
-            listening = pid_ports_map.get(record.pid, [])
-            if record.port in listening:
-                if record.circuit_open or record.crash_count > 0:
-                    state.update(name, crash_count=0, last_crash_at=None, circuit_open=False)
-                    results[name] = CrashObservation(
-                        circuit_open=False, crash_count=0, last_crash_at=None, ports=listening
-                    )
-                else:
-                    results[name] = CrashObservation(
-                        circuit_open=False,
-                        crash_count=record.crash_count,
-                        last_crash_at=record.last_crash_at,
-                        ports=listening,
-                    )
-                continue
-
-            # Port absent while alive
-            if record.circuit_open:
-                results[name] = CrashObservation(
-                    circuit_open=True,
-                    crash_count=record.crash_count,
-                    last_crash_at=record.last_crash_at,
-                    ports=listening,
-                )
-                continue
-
-            new_count = record.crash_count + 1
-            circuit_open = new_count >= crash_threshold
-            last_crash_at = self._clock()
-            state.update(
-                name,
-                crash_count=new_count,
-                last_crash_at=last_crash_at,
-                circuit_open=circuit_open,
-            )
-            results[name] = CrashObservation(
-                circuit_open=circuit_open,
-                crash_count=new_count,
-                last_crash_at=last_crash_at,
-                ports=listening,
-            )
-
-        return results
+        if not alive_pids:
+            pid_ports_map: dict[int, list[int]] = {}
+        elif isinstance(self._port_prober, BatchPortProber):
+            pid_ports_map = self._port_prober.listening_ports_by_pid(alive_pids)
+        else:
+            pid_ports_map = {pid: self._port_prober.listening_ports(pid) for pid in alive_pids}
+        return {
+            record.name: pid_ports_map.get(record.pid, []) if record.alive else []
+            for record in records
+        }
 
     # ── Read ─────────────────────────────────────────────────────────────────
 
     def all(self) -> list[ProcessRecord]:
-        return self._read_records()
+        state = StateManager(self._config)
+        with state.lifecycle_lock():
+            return self._read_records_locked()
 
     def get(self, name: str) -> ProcessRecord | None:
-        for r in self._read_records():
-            if r.name == name:
-                return r
-        return None
+        state = StateManager(self._config)
+        with state.lifecycle_lock():
+            for record in self._read_records_locked():
+                if record.name == name:
+                    return record
+            return None
 
     def alive_names(self) -> set[str]:
-        return {r.name for r in self._read_records() if r.alive}
+        state = StateManager(self._config)
+        with state.lifecycle_lock():
+            return {r.name for r in self._read_records_locked() if r.alive}
 
     def registry_pids(self) -> set[int]:
-        return {r.pid for r in self._read_records()}
+        state = StateManager(self._config)
+        with state.lifecycle_lock():
+            return {r.pid for r in self._read_records_locked()}
 
     @property
     def config(self) -> Config:
